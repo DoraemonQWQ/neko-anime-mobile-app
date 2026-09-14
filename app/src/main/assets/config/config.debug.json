@@ -1,0 +1,29 @@
+{
+  "api": {
+    "_comment": "开发环境：先执行 adb reverse tcp:8080 tcp:8080，手机的 127.0.0.1:8080 就转到本机 Docker 里的后端",
+    "baseUrl": "http://127.0.0.1:8080",
+    "connectTimeoutSeconds": 10,
+    "readTimeoutSeconds": 20,
+    "_comment_mockDelay": "给每个接口请求加的模拟延迟，用来肉眼确认「加载中」等状态；线上配置写 0",
+    "mockDelayMillis": 1200
+  },
+  "home": {
+    "_comment_recommend": "推荐板块：跟 Flutter 版一致用 校园/战斗/后宫，标题由 recommendTitlePrefix + 题材拼出来",
+    "carouselMax": 5,
+    "carouselIntervalMillis": 3000,
+    "recommendTags": ["校园", "战斗", "后宫"],
+    "recommendTitlePrefix": "番剧推荐 - ",
+    "continueWatchingMax": 10,
+    "continueWatchingFinishedPercent": 90,
+    "listPageSize": 20
+  },
+  "play": {
+    "recommendCount": 10
+  },
+  "update": {
+    "_comment": "检查更新走后端接口 /api/app/update；平台与渠道决定后端返回哪条发布记录",
+    "enabled": true,
+    "platform": "android",
+    "channel": ""
+  }
+}

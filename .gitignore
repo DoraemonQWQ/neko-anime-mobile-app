@@ -1,0 +1,24 @@
+# 构建产物
+build/
+*/build/
+.gradle/
+.kotlin/
+
+# 本机环境（SDK 路径等）
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# 签名相关：keystore 与口令**绝对不能**入库
+keystore.properties
+keystore/
+*.jks
+*.keystore
+
+# 系统 / 编辑器杂项
+.DS_Store
+Thumbs.db
+*.log
+captures/

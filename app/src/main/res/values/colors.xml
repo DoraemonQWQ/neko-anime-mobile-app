@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 亮色模式的窗口底色（跟 Theme.kt 里的 background 保持一致） -->
+    <color name="window_background">#FFF4F5F7</color>
+    <!-- 启动图标底色：白色（Logo 本身是黑色，保持「白底黑字」） -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

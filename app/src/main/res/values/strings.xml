@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面上显示的应用名；工程/包名是 NekoAnimeMobileApp / top.nekoanime.mobile.app -->
+    <string name="app_name">Neko Anime</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 能共享出去的路径：只开应用自己的外部私有目录（安装包下载在这里） -->
+<paths>
+    <external-files-path name="update" path="update/" />
+</paths>

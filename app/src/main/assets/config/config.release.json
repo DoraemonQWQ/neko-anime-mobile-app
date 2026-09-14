@@ -1,0 +1,28 @@
+{
+  "api": {
+    "_comment": "线上环境：真实接口域名（跟站点生产环境一致）",
+    "baseUrl": "https://api.nekoanime.top",
+    "connectTimeoutSeconds": 10,
+    "readTimeoutSeconds": 20,
+    "_comment_mockDelay": "线上不加模拟延迟，保持 0",
+    "mockDelayMillis": 0
+  },
+  "home": {
+    "carouselMax": 5,
+    "carouselIntervalMillis": 3000,
+    "recommendTags": ["校园", "战斗", "后宫"],
+    "recommendTitlePrefix": "番剧推荐 - ",
+    "continueWatchingMax": 10,
+    "continueWatchingFinishedPercent": 90,
+    "listPageSize": 20
+  },
+  "play": {
+    "recommendCount": 10
+  },
+  "update": {
+    "_comment": "检查更新走后端接口 /api/app/update；平台与渠道决定后端返回哪条发布记录",
+    "enabled": true,
+    "platform": "android",
+    "channel": ""
+  }
+}
