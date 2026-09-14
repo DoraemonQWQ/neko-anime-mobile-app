@@ -11,6 +11,7 @@ import okhttp3.Request
 import top.nekoanime.mobile.app.BuildConfig
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.api.ApiClient
+import top.nekoanime.mobile.app.data.api.ApiRoutes
 import top.nekoanime.mobile.app.model.dto.AppUpdateDto
 import java.io.File
 import java.io.FileOutputStream
@@ -61,7 +62,7 @@ object UpdateService {
         val platform = config.platform.ifBlank { "android" }
 
         return ApiClient.get(
-            path = "/api/app/update",
+            path = ApiRoutes.APP_UPDATE,
             query = mapOf(
                 "platform" to platform,
                 "version" to BuildConfig.VERSION_NAME,

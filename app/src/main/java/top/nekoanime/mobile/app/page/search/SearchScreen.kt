@@ -59,25 +59,32 @@ import top.nekoanime.mobile.app.model.entity.AnimeBrief
  *
  * @description 从首页那个"假搜索框"进来，这里才是真的输入框：输入关键字回车 → 调后端搜索接口，
  * 结果是三列网格，滚到底自动加载下一页。进入页面自动聚焦并弹出键盘（跟常见 App 一致）。
+ * 关键字由外层保存：从结果里进播放页再返回时，这里能接着上次的关键字重新搜一遍，
+ * 而不是回到一个空白搜索页。
  *
  * @param onOpenAnime 点搜索结果（进播放页）
  * @param onBack 返回首页
+ * @param initialKeyword 上次用的关键字（外层保存），空串表示还没搜过
+ * @param onKeywordChange 关键字变化时同步给外层，返回本页时可以接着用
  */
 @Composable
 fun SearchScreen(
     onOpenAnime: (Int) -> Unit,
     onBack: () -> Unit,
+    initialKeyword: String = "",
+    onKeywordChange: (String) -> Unit = {},
 ) {
     val pageSize = ConfigLoader.config.home.listPageSize
 
-    var keyword by remember { mutableStateOf("") }
-    var submittedKeyword by remember { mutableStateOf("") }
+    var keyword by remember { mutableStateOf(initialKeyword) }
+    var submittedKeyword by remember { mutableStateOf(initialKeyword.trim()) }
     val results = remember { mutableStateListOf<AnimeBrief>() }
     var page by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(false) }
     var hasMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var searched by remember { mutableStateOf(false) }
+    // 带着上次的关键字回来时直接算"搜过了"，下面的 LaunchedEffect 会重新拉第一页
+    var searched by remember { mutableStateOf(initialKeyword.isNotBlank()) }
 
     val gridState = rememberLazyGridState()
     val focusRequester = remember { FocusRequester() }
@@ -141,9 +148,11 @@ fun SearchScreen(
             }
     }
 
-    // 进页面聚焦搜索框
+    // 进页面聚焦搜索框；带着关键字回来时不弹键盘（用户是回来看结果的，不是来输入的）
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        if (initialKeyword.isBlank()) {
+            focusRequester.requestFocus()
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -170,7 +179,10 @@ fun SearchScreen(
             NekoSearchBar(
                 placeholder = "请输入番剧名",
                 value = keyword,
-                onValueChange = { keyword = it },
+                onValueChange = {
+                    keyword = it
+                    onKeywordChange(it)
+                },
                 onSubmit = { startSearch() },
                 modifier = Modifier
                     .weight(1f)

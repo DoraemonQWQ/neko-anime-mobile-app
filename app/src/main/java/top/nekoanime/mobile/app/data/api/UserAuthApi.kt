@@ -39,7 +39,7 @@ object UserAuthApi {
      * @returns 成功是 JWT token
      */
     suspend fun login(username: String, password: String): Result<String> = ApiClient.postText(
-        path = "/api/user/auth/login",
+        path = ApiRoutes.USER_LOGIN,
         body = LoginBody(username = username, password = password),
         bodySerializer = LoginBody.serializer(),
     )
@@ -52,7 +52,7 @@ object UserAuthApi {
      * @returns 成功/失败
      */
     suspend fun changePassword(oldPassword: String, newPassword: String): Result<Unit> = ApiClient.postUnit(
-        path = "/api/user/auth/password",
+        path = ApiRoutes.USER_CHANGE_PASSWORD,
         body = ChangePasswordBody(oldPassword = oldPassword, newPassword = newPassword),
         bodySerializer = ChangePasswordBody.serializer(),
     )

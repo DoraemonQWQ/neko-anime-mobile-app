@@ -18,7 +18,7 @@ object AnimeApi {
      * @returns 番剧列表（后端已经按热度排好）
      */
     suspend fun hot(): Result<List<AnimeBasicDto>> = ApiClient.get(
-        path = "/api/anime/hot",
+        path = ApiRoutes.ANIME_HOT,
         serializer = ListSerializer(AnimeBasicDto.serializer()),
     )
 
@@ -66,7 +66,7 @@ object AnimeApi {
         source: String,
         category: String,
     ): Result<PageDataDto<AnimeBasicDto>> = ApiClient.get(
-        path = "/api/anime/list",
+        path = ApiRoutes.ANIME_LIST,
         query = mapOf(
             "page" to page.toString(),
             "limit" to limit.toString(),
@@ -89,7 +89,7 @@ object AnimeApi {
      */
     suspend fun search(keyword: String, page: Int, limit: Int): Result<PageDataDto<AnimeBasicDto>> =
         ApiClient.get(
-            path = "/api/anime/search",
+            path = ApiRoutes.ANIME_SEARCH,
             query = mapOf("keyword" to keyword, "page" to page.toString(), "limit" to limit.toString()),
             serializer = PageDataDto.serializer(AnimeBasicDto.serializer()),
         )
@@ -103,7 +103,7 @@ object AnimeApi {
      */
     suspend fun recommendByTag(tag: String, filterAnimeId: Int = -1): Result<List<AnimeBasicDto>> =
         ApiClient.get(
-            path = "/api/anime/recommend/tag",
+            path = ApiRoutes.ANIME_RECOMMEND_TAG,
             query = mapOf("tags" to tag, "filter_anime_id" to filterAnimeId.toString()),
             serializer = ListSerializer(AnimeBasicDto.serializer()),
         )
@@ -117,7 +117,7 @@ object AnimeApi {
      */
     suspend fun recommendForAnime(animeId: Int, count: Int = 10): Result<List<AnimeBasicDto>> =
         ApiClient.get(
-            path = "/api/anime/recommend/anime",
+            path = ApiRoutes.ANIME_RECOMMEND_ANIME,
             query = mapOf("anime_id" to animeId.toString(), "count" to count.toString()),
             serializer = ListSerializer(AnimeBasicDto.serializer()),
         )
@@ -129,7 +129,7 @@ object AnimeApi {
      * @returns 详情
      */
     suspend fun detail(animeId: Int): Result<AnimeDetailDto> = ApiClient.get(
-        path = "/api/anime/$animeId",
+        path = ApiRoutes.animeDetail(animeId),
         serializer = AnimeDetailDto.serializer(),
     )
 
@@ -140,7 +140,7 @@ object AnimeApi {
      * @returns 播放信息（`video` 是后端拼好的完整地址）
      */
     suspend fun episodePlay(episodeId: Int): Result<EpisodePlayDto> = ApiClient.get(
-        path = "/api/anime/episode/play/$episodeId",
+        path = ApiRoutes.episodePlay(episodeId),
         serializer = EpisodePlayDto.serializer(),
     )
 }

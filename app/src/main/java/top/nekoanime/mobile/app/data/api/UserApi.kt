@@ -23,7 +23,7 @@ object UserApi {
         page: Int = 1,
         limit: Int = 12,
     ): Result<PageDataDto<UserHistoryDto>> = ApiClient.get(
-        path = "/api/user/data/history",
+        path = ApiRoutes.USER_HISTORY,
         query = mapOf("keyword" to keyword, "page" to page.toString(), "limit" to limit.toString()),
         serializer = PageDataDto.serializer(UserHistoryDto.serializer()),
     )

@@ -19,7 +19,7 @@ object UserIdentityApi {
      * @returns 用户资料
      */
     suspend fun info(): Result<UserInfoDto> = ApiClient.get(
-        path = "/api/user/data/info",
+        path = ApiRoutes.USER_INFO,
         serializer = UserInfoDto.serializer(),
     )
 
@@ -36,7 +36,7 @@ object UserIdentityApi {
         fileMd5: String,
         extension: String,
     ): Result<AvatarUploadUrlDto> = ApiClient.post(
-        path = "/api/user/data/avatar/upload-url",
+        path = ApiRoutes.USER_AVATAR_UPLOAD_URL,
         body = AvatarUploadUrlBody(fileSize = fileSize, fileMd5 = fileMd5, extension = extension),
         bodySerializer = AvatarUploadUrlBody.serializer(),
         serializer = AvatarUploadUrlDto.serializer(),
@@ -49,7 +49,7 @@ object UserIdentityApi {
      * @returns 只有成功/失败
      */
     suspend fun commitAvatar(key: String): Result<Unit> = ApiClient.postUnit(
-        path = "/api/user/data/avatar/commit",
+        path = ApiRoutes.USER_AVATAR_COMMIT,
         body = AvatarCommitBody(key = key),
         bodySerializer = AvatarCommitBody.serializer(),
     )
@@ -61,7 +61,7 @@ object UserIdentityApi {
      * @returns 更新后的用户资料
      */
     suspend fun updateNickname(nickname: String): Result<UserInfoDto> = ApiClient.post(
-        path = "/api/user/data/profile/nickname",
+        path = ApiRoutes.USER_NICKNAME,
         body = UpdateNicknameBody(nickname = nickname),
         bodySerializer = UpdateNicknameBody.serializer(),
         serializer = UserInfoDto.serializer(),

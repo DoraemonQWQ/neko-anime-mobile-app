@@ -7,7 +7,7 @@ Neko Anime 的安卓客户端，接口全部来自 [Neko Anime 后端](../../Ser
 - **Kotlin 2.0 + Jetpack Compose**（Material 3，自研主题：白 / 淡灰 / 粉，深浅色跟随系统）
 - **Media3 ExoPlayer**：播放页（手势、选集抽屉、锁屏、全屏、续播）
 - **Coil**：封面与头像；**OkHttp + kotlinx.serialization**：接口调用
-- 单 Activity + 自研路由（`AnimatedContent` 转场），不引导航库
+- 单 Activity + 自研路由（`AnimatedContent` 转场 + 自己的返回栈），不引导航库，理由见下文「导航与返回」
 
 ## 目录结构
 
@@ -17,7 +17,7 @@ app/src/main/
 ├── java/top/nekoanime/mobile/app/
 │   ├── component/                 # 公共 UI（含 theme/、弹框、卡片、搜索框）
 │   ├── config/                    # AppConfig 映射类 + 配置加载器
-│   ├── data/                      # api（接口）/ local（本机存储）/ repository
+│   ├── data/                      # api（接口 + ApiRoutes 路由表）/ local（本机存储）/ repository
 │   ├── model/                     # dto（接口结构）与 entity（界面实体）
 │   ├── page/                      # 页面：splash / home / search / play / history / settings / user
 │   ├── service/                   # 业务服务（版本更新、播放埋点）
@@ -75,5 +75,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 番剧：`/api/anime/hot`、`/list`、`/search`、`/recommend/tag`、`/recommend/anime`、`/{id}`、`/episode/play/{episodeId}`
 - 用户：`/api/user/auth/login`、`/api/user/data/{info,history,profile/nickname,avatar/*}`
 - 更新：`/api/app/update`
+
+接口路径全部集中在 `data/api/ApiRoutes.kt`：固定路径是常量，带动态参数的（`animeDetail(id)`、`episodePlay(id)`）是函数，调用方不会手写字符串拼接。
+
+## 导航与返回
+
+页面用 `sealed interface AppRoute` 描述（编译期就能查错，比字符串路由安全），`MainActivity` 自己维护一个**返回栈**：
+
+- **层级返回**：播放页底部推荐点进去会再压一层播放页，返回回到上一个番剧；搜索页 → 播放页 返回回到搜索页，并且**保留上次的关键字**（关键字由外层保存）。
+- **Tab 页返回**：在首页这一层按返回，如果当前不在「主页」Tab，先切回主页；已经在主页则提示「再按一次退出应用」，2 秒内再按一次才真的退出（对应 B 站那种返回习惯）。
+- **一键回主页**：播放页顶栏的主页按钮直接**清空返回栈**回到首页，不再逐层回退。
+- 转场动画区分前进/后退方向（搜索页用缩放、启动页到首页是纯淡入淡出）。
+
+为什么不用官方 Navigation Compose：目的地数量少、参数只有 Int/Long，sealed interface 已经是类型安全的路由；转场需要定制；播放器实例必须跨全屏/切集保持同一个对象，路由层越薄越不容易被重建。**代价**是没有 deep link 与进程恢复——等做到「分享某集链接」时需要换成 Navigation Compose（2.8+ 类型安全路由，本项目已在用 kotlinx.serialization，迁移成本不高），届时把这里替换成 `NavHost` 即可。
 
 后端的权限、字段与部署方式见 `Server/NekoAnime/docs/development-guide.md`。

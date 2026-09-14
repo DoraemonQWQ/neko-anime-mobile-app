@@ -4,9 +4,13 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +29,8 @@ import androidx.compose.animation.togetherWith
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.theme.NekoPlayerTheme
 import top.nekoanime.mobile.app.component.UpdateDialog
 import top.nekoanime.mobile.app.config.ConfigLoader
@@ -41,17 +47,44 @@ import top.nekoanime.mobile.app.state.SessionState
 /**
  * 应用入口。
  *
- * @description 负责三件事：
+ * @description 负责四件事：
  * 1. 启动前先读配置（接口地址、首页板块等都在 `assets/config/config.<模式>.json`）；
- * 2. 页面路由：首页 ⇄ 播放页（移动端没有详情页，点卡片直接进播放）；
- * 3. 全屏：横屏 + 隐藏系统栏；系统栏图标的明暗按当前页面背景决定。
+ * 2. 页面路由：自己维护一个**返回栈**（见 {@link backStack}），支持层级返回；
+ * 3. 返回键：二级页面逐层回退；回到首页再按一次提示「再按一次退出应用」；
+ * 4. 全屏：横屏 + 隐藏系统栏；系统栏图标的明暗按当前页面背景决定。
  */
 class MainActivity : ComponentActivity() {
+    /** 「再按一次退出应用」的确认窗口（毫秒） */
+    private val exitConfirmMillis = 2000L
+
     /** 是否全屏（播放页用） */
     private var fullscreen by mutableStateOf(false)
 
-    /** 当前页面（从启动页开始） */
-    private var route by mutableStateOf<AppRoute>(AppRoute.Splash)
+    /**
+     * 页面返回栈（栈顶就是当前页面）。
+     *
+     * @description 用栈而不是单个状态，是为了「层级返回」：
+     * 播放页里的推荐点进去会再压一层播放页，返回时回到上一个播放页，而不是直接回首页；
+     * 搜索页 → 播放页 返回也是回到搜索页（带着上次的关键字）。
+     */
+    private val backStack = mutableStateListOf<AppRoute>(AppRoute.Splash)
+
+    /** 当前页面（返回栈栈顶） */
+    private val route: AppRoute get() = backStack.last()
+
+    /**
+     * 本次切换是「进入下一层」还是「返回上一层」。
+     *
+     * @description 转场动画要用它决定从左边还是右边滑入；
+     * 栈顶的 route 判断不出方向（播放页 → 播放页 的数据类不相等但都属于前进）。
+     */
+    private var navForward by mutableStateOf(true)
+
+    /** 是否已经按过一次返回键（用于「再按一次退出应用」） */
+    private var exitPending by mutableStateOf(false)
+
+    /** 搜索页上次用的关键字：返回搜索页时接着用，避免回到空白页 */
+    private var searchKeyword by mutableStateOf("")
 
     /**
      * 启动时检查到的新版本。
@@ -86,17 +119,43 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NekoPlayerTheme {
+                val scope = rememberCoroutineScope()
+
                 // 换页面时重算系统栏图标明暗（播放页顶部是黑底，首页是主题背景）
                 LaunchedEffect(route) {
                     applySystemBarAppearance()
+                }
+
+                /*
+                 * 首页（Tab 页）的返回键：
+                 * 1. 不在「主页」Tab 时先切回主页（不退出）；
+                 * 2. 已经在主页时提示「再按一次退出应用」，2 秒内再按一次才真的退出。
+                 * 二级页面各自有 BackHandler，会先把返回键消费掉，不会走到这里。
+                 */
+                BackHandler(enabled = route is AppRoute.Home) {
+                    if (homeTab != HomeTab.Home) {
+                        homeTab = HomeTab.Home
+                        return@BackHandler
+                    }
+
+                    if (exitPending) {
+                        finish()
+                        return@BackHandler
+                    }
+
+                    exitPending = true
+                    Toast.makeText(this@MainActivity, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+
+                    scope.launch {
+                        delay(exitConfirmMillis)
+                        exitPending = false
+                    }
                 }
 
                 // 页面转场动画：进二级页从右侧滑入，返回时反向滑出
                 AnimatedContent(
                     targetState = route,
                     transitionSpec = {
-                        val forward = targetState !is AppRoute.Home
-
                         // 搜索页用「缩放」过渡（点假搜索框进去时像弹出来一样），其余二级页仍旧左右滑
                         when {
                             // 启动页 → 首页：纯淡入淡出（两边时长一致才是干净的交叠淡出，没有位移）
@@ -111,7 +170,7 @@ class MainActivity : ComponentActivity() {
                                 (scaleIn(initialScale = 1.04f, animationSpec = tween(200)) + fadeIn(tween(200))) togetherWith
                                     (scaleOut(targetScale = 0.92f, animationSpec = tween(220)) + fadeOut(tween(180)))
 
-                            forward ->
+                            navForward ->
                                 (slideInHorizontally(animationSpec = tween(260)) { it } + fadeIn(tween(260))) togetherWith
                                     (slideOutHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeOut(tween(200)))
 
@@ -126,46 +185,52 @@ class MainActivity : ComponentActivity() {
                         is AppRoute.Splash -> SplashScreen(
                             onReady = { update ->
                                 pendingUpdate = update
-                                route = AppRoute.Home
+                                resetToHome()
                             },
                         )
 
                         is AppRoute.Home -> HomeScreen(
-                            onOpenAnime = { animeId -> route = AppRoute.Play(animeId = animeId) },
+                            onOpenAnime = { animeId -> pushRoute(AppRoute.Play(animeId = animeId)) },
                             onContinue = { history ->
                                 // 继续观看：把集数和进度带过去，播放页直接跳到那里（不看本地/线上）
-                                route = AppRoute.Play(
-                                    animeId = history.animeId,
-                                    startEpisodeId = history.episodeId,
-                                    startPositionMs = history.progressSeconds * 1000,
+                                pushRoute(
+                                    AppRoute.Play(
+                                        animeId = history.animeId,
+                                        startEpisodeId = history.episodeId,
+                                        startPositionMs = history.progressSeconds * 1000,
+                                    ),
                                 )
                             },
-                            onOpenSearch = { route = AppRoute.Search },
+                            onOpenSearch = { pushRoute(AppRoute.Search) },
                             // 底部 Tab 的选中态交给 Activity 保管（见 homeTab 的说明）
                             selectedTab = homeTab,
                             onTabChange = { homeTab = it },
-                            onOpenHistory = { route = AppRoute.History },
-                            onOpenSettings = { route = AppRoute.Settings },
+                            onOpenHistory = { pushRoute(AppRoute.History) },
+                            onOpenSettings = { pushRoute(AppRoute.Settings) },
                         )
 
                         is AppRoute.Search -> SearchScreen(
-                            onOpenAnime = { animeId -> route = AppRoute.Play(animeId = animeId) },
-                            onBack = { backToHome() },
+                            onOpenAnime = { animeId -> pushRoute(AppRoute.Play(animeId = animeId)) },
+                            onBack = { goBack() },
+                            initialKeyword = searchKeyword,
+                            onKeywordChange = { searchKeyword = it },
                         )
 
                         is AppRoute.History -> HistoryScreen(
                             // 点某条历史：带着那一集的 id 和当时的进度进播放页（跟 web 的继续观看一致）
                             onOpenEpisode = { animeId, episodeId, progressSeconds ->
-                                route = AppRoute.Play(
-                                    animeId = animeId,
-                                    startEpisodeId = episodeId,
-                                    startPositionMs = progressSeconds * 1000,
+                                pushRoute(
+                                    AppRoute.Play(
+                                        animeId = animeId,
+                                        startEpisodeId = episodeId,
+                                        startPositionMs = progressSeconds * 1000,
+                                    ),
                                 )
                             },
-                            onBack = { backToHome() },
+                            onBack = { goBack() },
                         )
 
-                        is AppRoute.Settings -> SettingsScreen(onBack = { backToHome() })
+                        is AppRoute.Settings -> SettingsScreen(onBack = { goBack() })
 
                         is AppRoute.Play -> PlayRoute(
                             animeId = current.animeId,
@@ -175,12 +240,12 @@ class MainActivity : ComponentActivity() {
                                 if (fullscreen) {
                                     applyFullscreen(false)
                                 } else {
-                                    backToHome()
+                                    goBack()
                                 }
                             },
-                            onHome = { backToHome() },
-                            // 播放页底部的推荐：直接换成那个番剧的播放页
-                            onOpenAnime = { animeId -> route = AppRoute.Play(animeId = animeId) },
+                            onHome = { resetToHome() },
+                            // 播放页底部的推荐：**压一层**新播放页，返回时回到上一个番剧（层级返回）
+                            onOpenAnime = { animeId -> pushRoute(AppRoute.Play(animeId = animeId)) },
                             startEpisodeId = current.startEpisodeId,
                             startPositionMs = current.startPositionMs,
                         )
@@ -214,14 +279,50 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 回首页：顺手退出全屏，并把系统栏图标切回"按主题"。
+     * 进入下一层页面（压栈）。
+     *
+     * @description 栈顶就是当前页面；转场方向标记为「前进」，动画从右侧滑入。
+     *
+     * @param next 目标页面
      */
-    private fun backToHome() {
+    private fun pushRoute(next: AppRoute) {
+        navForward = true
+        backStack.add(next)
+    }
+
+    /**
+     * 返回上一层（弹栈）。
+     *
+     * @description 用了自研返回栈后，二级页面一律逐层回退：
+     * 播放页里的推荐点进去就再压了一层播放页，返回回到上一个番剧，而不是直接回首页。
+     *
+     * @returns 真的回退了一层返回 true；已经在根节点（首页）返回 false
+     */
+    private fun goBack(): Boolean {
+        if (backStack.size <= 1) {
+            return false
+        }
+
+        navForward = false
+        backStack.removeAt(backStack.lastIndex)
+
+        return true
+    }
+
+    /**
+     * 直接回到首页根节点（清空返回栈）。
+     *
+     * @description 启动页初始化完成、播放页的「主页」按钮、以及任何「不管在哪都回首页」的场景用它；
+     * 顺手退出全屏，系统栏图标会在路由变化后按首页重算。
+     */
+    private fun resetToHome() {
         if (fullscreen) {
             applyFullscreen(false)
         }
 
-        route = AppRoute.Home
+        navForward = true
+        backStack.clear()
+        backStack.add(AppRoute.Home)
     }
 
     /**
