@@ -1,4 +1,7 @@
 package top.nekoanime.mobile.app.model.entity
+
+import kotlinx.serialization.Serializable
+
 /**
  * 番剧详情（播放页要用的那部分）。
  *
@@ -14,6 +17,7 @@ package top.nekoanime.mobile.app.model.entity
  * @param summary 简介
  * @param episodes 全部剧集（按集数升序）
  */
+@Serializable
 data class AnimeDetail(
     val id: Int,
     val title: String,
@@ -39,6 +43,7 @@ data class AnimeDetail(
  * @param score 评分
  * @param description 简介（轮播图上会用到）
  */
+@Serializable
 data class AnimeBrief(
     val id: Int,
     val title: String,

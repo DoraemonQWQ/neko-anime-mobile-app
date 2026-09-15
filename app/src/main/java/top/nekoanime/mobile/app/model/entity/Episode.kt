@@ -1,4 +1,7 @@
 package top.nekoanime.mobile.app.model.entity
+
+import kotlinx.serialization.Serializable
+
 /**
  * 一集数据。
  *
@@ -12,6 +15,7 @@ package top.nekoanime.mobile.app.model.entity
  * @param number 集数（展示用）
  * @param title 剧集标题（为空时界面用「第 N 集」兜底）
  */
+@Serializable
 data class Episode(
     val id: Int,
     val number: Int,

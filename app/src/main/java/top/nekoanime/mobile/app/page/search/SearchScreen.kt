@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.AnimePosterCard
 import top.nekoanime.mobile.app.component.NekoSearchBar
+import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
 import top.nekoanime.mobile.app.model.entity.AnimeBrief
@@ -76,15 +78,19 @@ fun SearchScreen(
 ) {
     val pageSize = ConfigLoader.config.home.listPageSize
 
-    var keyword by remember { mutableStateOf(initialKeyword) }
-    var submittedKeyword by remember { mutableStateOf(initialKeyword.trim()) }
-    val results = remember { mutableStateListOf<AnimeBrief>() }
-    var page by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
-    var hasMore by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    // 带着上次的关键字回来时直接算"搜过了"，下面的 LaunchedEffect 会重新拉第一页
-    var searched by remember { mutableStateOf(initialKeyword.isNotBlank()) }
+    var keyword by rememberSaveable { mutableStateOf(initialKeyword) }
+    var submittedKeyword by rememberSaveable { mutableStateOf(initialKeyword.trim()) }
+
+    // 搜索结果与分页状态都保存：进播放页再返回时结果还在，不会重新搜一遍
+    val results = rememberSaveableList<AnimeBrief>("search_results")
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    var loading by rememberSaveable { mutableStateOf(false) }
+    var hasMore by rememberSaveable { mutableStateOf(false) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    // 带着上次的关键字回来时直接算"搜过了"
+    var searched by rememberSaveable { mutableStateOf(initialKeyword.isNotBlank()) }
+    // 上一次已经搜过的关键字：返回本页时如果没变过就直接用已有结果
+    var loadedKeyword by rememberSaveable { mutableStateOf("") }
 
     val gridState = rememberLazyGridState()
     val focusRequester = remember { FocusRequester() }
@@ -133,8 +139,13 @@ fun SearchScreen(
 
     LaunchedEffect(submittedKeyword) {
         if (submittedKeyword.isNotBlank()) {
+            if (results.isNotEmpty() && submittedKeyword == loadedKeyword) {
+                return@LaunchedEffect
+            }
+
             hasMore = true
             loadNextPage()
+            loadedKeyword = submittedKeyword
         }
     }
 

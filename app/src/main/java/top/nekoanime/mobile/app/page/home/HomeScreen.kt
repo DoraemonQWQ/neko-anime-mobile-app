@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import top.nekoanime.mobile.app.R
 import top.nekoanime.mobile.app.component.AnimePosterCard
 import top.nekoanime.mobile.app.component.FilterSelector
 import top.nekoanime.mobile.app.component.LoginDialog
+import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.AnimeFilterOptions
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
@@ -64,9 +66,21 @@ import top.nekoanime.mobile.app.page.home.component.HomeHero
 import top.nekoanime.mobile.app.page.home.component.HomeTopBar
 import top.nekoanime.mobile.app.page.user.UserTab
 import top.nekoanime.mobile.app.state.SessionState
+import kotlinx.serialization.Serializable
 
 /** 首页内容区左右/上下内边距（跟 Flutter 版 UiConst.kPadding 一致：8dp） */
 private val PagePadding = 8.dp
+
+/**
+ * 首页的一组题材推荐（标题 + 番剧列表）。
+ *
+ * @description 抽成可序列化的数据类，页面状态才能存进 rememberSaveable（返回时不用重新请求）。
+ *
+ * @param title 板块标题（前缀 + 题材）
+ * @param animes 这一行的番剧
+ */
+@Serializable
+data class HomeRecommendRow(val title: String, val animes: List<AnimeBrief>)
 
 /** 板块之间的间隔（Flutter 版用 10dp） */
 private val SectionSpacing = 10.dp
@@ -232,35 +246,50 @@ private fun HomeTabContent(
 ) {
     val homeConfig = ConfigLoader.config.home
 
-    var hot by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
-    var rows by remember { mutableStateOf<List<Pair<String, List<AnimeBrief>>>>(emptyList()) }
-    var continueWatching by remember { mutableStateOf<List<WatchHistory>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var failed by remember { mutableStateOf(false) }
-    var reloadKey by remember { mutableIntStateOf(0) }
+    // 这些列表用 rememberSaveable 存：从二级页返回时直接复用，不再请求一次、也不会白屏一下
+    val hot = rememberSaveableList<AnimeBrief>("home_hot")
+    val rows = rememberSaveableList<HomeRecommendRow>("home_rows")
+    val continueWatching = rememberSaveableList<WatchHistory>("home_continue")
+    var loading by rememberSaveable { mutableStateOf(true) }
+    var failed by rememberSaveable { mutableStateOf(false) }
+    var reloadKey by rememberSaveable { mutableIntStateOf(0) }
+    var loadedOnce by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
+        // 已经有数据（从二级页返回）且不是手动刷新：直接用缓存，不再打接口
+        if (loadedOnce && reloadKey == 0) {
+            loading = false
+            return@LaunchedEffect
+        }
+
         loading = true
         failed = false
 
         // 1) 轮播：后端热门，最多 carouselMax 个
         val hotResult = AnimeRepository.hot()
-        hot = hotResult.getOrDefault(emptyList())
+        hot.clear()
+        hot.addAll(hotResult.getOrDefault(emptyList()))
 
         // 2) 题材推荐：配置里配了几个题材就几组，标题 = 前缀 + 题材
-        rows = homeConfig.recommendTags.mapNotNull { tag ->
-            AnimeRepository.recommendByTag(tag)
-                .getOrNull()
-                ?.takeIf { it.isNotEmpty() }
-                ?.let { "${homeConfig.recommendTitlePrefix}$tag" to it }
-        }
+        rows.clear()
+        rows.addAll(
+            homeConfig.recommendTags.mapNotNull { tag ->
+                AnimeRepository.recommendByTag(tag)
+                    .getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { HomeRecommendRow("${homeConfig.recommendTitlePrefix}$tag", it) }
+            },
+        )
 
         // 3) 继续观看：需要登录；未登录后端会 401，这里就是空列表（整块不显示）
-        continueWatching = UserRepository.history(limit = homeConfig.continueWatchingMax)
-            .getOrDefault(emptyList())
+        continueWatching.clear()
+        continueWatching.addAll(
+            UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
+        )
 
         failed = hotResult.isFailure && rows.isEmpty()
         loading = false
+        loadedOnce = true
     }
 
     // 下拉刷新：重新拉轮播 / 推荐 / 继续观看（已有内容时才显示刷新指示器，首次加载走中间的转圈）
@@ -306,8 +335,8 @@ private fun HomeTabContent(
 
                 ContinueWatchingRow(items = continueWatching, onContinue = onContinue)
 
-                rows.forEach { (title, animes) ->
-                    AnimeRow(title = title, animes = animes, onOpenAnime = onOpenAnime)
+                rows.forEach { row ->
+                    AnimeRow(title = row.title, animes = row.animes, onOpenAnime = onOpenAnime)
                 }
             }
         }
@@ -325,22 +354,25 @@ private fun HomeTabContent(
 private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
     val pageSize = ConfigLoader.config.home.listPageSize
 
-    val items = remember { mutableStateListOf<AnimeBrief>() }
-    var page by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
-    var hasMore by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    // 列表与分页状态都保存：从播放页返回时列表还在、滚动位置也还在，不会重新从第一页加载
+    val items = rememberSaveableList<AnimeBrief>("anime_list_items")
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    var loading by rememberSaveable { mutableStateOf(false) }
+    var hasMore by rememberSaveable { mutableStateOf(true) }
+    var refreshing by rememberSaveable { mutableStateOf(false) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
     val gridState = rememberLazyGridState()
     // 下拉刷新：加一个自增 key 让下面的 LaunchedEffect 重新跑一遍（清空 + 拉第一页）
-    var refreshKey by remember { mutableIntStateOf(0) }
+    var refreshKey by rememberSaveable { mutableIntStateOf(0) }
+    // 已经处理过的刷新 key：返回本页时如果没变过，就直接复用已有列表
+    var handledRefreshKey by rememberSaveable { mutableIntStateOf(0) }
 
     // 筛选项（跟 Flutter 版一致：年份 / 月份 / 类型 / 来源 / 分类）
-    var year by remember { mutableStateOf("all") }
-    var month by remember { mutableStateOf("all") }
-    var type by remember { mutableStateOf("all") }
-    var source by remember { mutableStateOf("all") }
-    var category by remember { mutableStateOf("all") }
+    var year by rememberSaveable { mutableStateOf("all") }
+    var month by rememberSaveable { mutableStateOf("all") }
+    var type by rememberSaveable { mutableStateOf("all") }
+    var source by rememberSaveable { mutableStateOf("all") }
+    var category by rememberSaveable { mutableStateOf("all") }
 
     /** 加载下一页（正在加载或没有下一页时直接返回） */
     suspend fun loadNextPage() {
@@ -371,12 +403,18 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
         loading = false
     }
 
-    // 首次进入 + 任何筛选变化：清空重新拉第一页
+    // 首次进入 + 筛选变化 + 下拉刷新：清空重新拉第一页；
+    // 从二级页返回时（列表还在、条件没变）直接复用，不再请求
     LaunchedEffect(year, month, type, source, category, refreshKey) {
+        if (items.isNotEmpty() && refreshKey == handledRefreshKey) {
+            return@LaunchedEffect
+        }
+
         items.clear()
         page = 0
         hasMore = true
         loadNextPage()
+        handledRefreshKey = refreshKey
         refreshing = false
     }
 

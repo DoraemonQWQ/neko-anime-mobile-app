@@ -6,6 +6,7 @@ coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.10.01"
+navigation = "2.8.4"
 media3 = "1.4.1"
 coil = "2.7.0"
 kotlinxSerialization = "1.7.3"
@@ -26,6 +27,9 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 # 扩展图标集：Pause / Lock 这些常用图标不在 core 里，播放器测试工程直接用扩展包（体积不影响）
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# 官方导航：类型安全路由（route 用 @Serializable 数据类，参数不用拼字符串）+ 每个页面自己的返回栈与状态保存
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 
 # Media3 = 新版 ExoPlayer，Android 官方播放器
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }

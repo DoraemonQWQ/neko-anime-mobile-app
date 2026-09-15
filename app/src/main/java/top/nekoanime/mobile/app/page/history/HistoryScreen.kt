@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.CoverImage
+import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.UserRepository
 import top.nekoanime.mobile.app.model.entity.WatchHistory
@@ -87,13 +89,14 @@ fun HistoryScreen(
     onOpenEpisode: (animeId: Int, episodeId: Int, progressSeconds: Long) -> Unit,
     onBack: () -> Unit,
 ) {
-    val items = remember { mutableStateListOf<WatchHistory>() }
+    // 列表与分页状态都保存：从播放页返回时记录还在，不会重新拉第一页
+    val items = rememberSaveableList<WatchHistory>("history_items")
     val scope = rememberCoroutineScope()
-    var page by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
-    var refreshing by remember { mutableStateOf(false) }
-    var hasMore by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    var loading by rememberSaveable { mutableStateOf(false) }
+    var refreshing by rememberSaveable { mutableStateOf(false) }
+    var hasMore by rememberSaveable { mutableStateOf(true) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     BackHandler { onBack() }
@@ -120,7 +123,10 @@ fun HistoryScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadNextPage()
+        // 返回本页时列表还在就复用，不再请求一次
+        if (items.isEmpty()) {
+            loadNextPage()
+        }
     }
 
     // 滚到底部（最后一条进入视野）才自动加载下一页

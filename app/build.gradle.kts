@@ -90,6 +90,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
 
     // 播放器：Media3（ExoPlayer）+ 官方 PlayerView（我们用 Compose 自己画控制栏，所以关掉它的默认控制器）
     implementation(libs.androidx.media3.exoplayer)

@@ -1,4 +1,7 @@
 package top.nekoanime.mobile.app.model.entity
+
+import kotlinx.serialization.Serializable
+
 /**
  * 一条观看历史（首页「继续观看」用）。
  *
@@ -12,6 +15,7 @@ package top.nekoanime.mobile.app.model.entity
  * @param finished 是否已看完
  * @param coverUrl 这一集的封面（后端抽帧的 16:9 图）
  */
+@Serializable
 data class WatchHistory(
     val animeId: Int,
     val animeTitle: String,

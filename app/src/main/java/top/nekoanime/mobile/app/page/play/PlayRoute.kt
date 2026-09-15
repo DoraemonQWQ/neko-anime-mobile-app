@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
+import top.nekoanime.mobile.app.component.rememberSaveableState
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
 
 /**
@@ -39,7 +41,7 @@ import top.nekoanime.mobile.app.model.entity.AnimeDetail
  * @param startPositionMs 与 startEpisodeId 配套的播放位置
  */
 @Composable
-fun PlayRoute(
+fun PlayRouteScreen(
     animeId: Int,
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
@@ -49,9 +51,11 @@ fun PlayRoute(
     startEpisodeId: Int? = null,
     startPositionMs: Long = 0L,
 ) {
-    var anime by remember(animeId) { mutableStateOf<AnimeDetail?>(null) }
-    var error by remember(animeId) { mutableStateOf<String?>(null) }
-    var loading by remember(animeId) { mutableStateOf(true) }
+    // 详情与加载状态保存：从推荐页返回时直接用已有详情，不再请求一次
+    val animeState = rememberSaveableState<AnimeDetail>("play_detail_$animeId")
+    var error by rememberSaveable(animeId) { mutableStateOf<String?>(null) }
+    var loading by rememberSaveable(animeId) { mutableStateOf(true) }
+    val anime = animeState.value
 
     // 系统返回键：播放页的返回是先退全屏、再回上一页
     BackHandler {
@@ -63,11 +67,17 @@ fun PlayRoute(
     }
 
     LaunchedEffect(animeId) {
+        // 详情已经在（返回本页）：直接用缓存
+        if (anime != null && anime.id == animeId) {
+            loading = false
+            return@LaunchedEffect
+        }
+
         loading = true
         error = null
 
         AnimeRepository.detail(animeId)
-            .onSuccess { anime = it }
+            .onSuccess { animeState.value = it }
             .onFailure { error = it.message ?: "加载失败" }
 
         loading = false

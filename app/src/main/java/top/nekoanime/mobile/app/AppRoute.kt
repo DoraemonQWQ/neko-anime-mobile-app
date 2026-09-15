@@ -1,47 +1,49 @@
 package top.nekoanime.mobile.app
 
-/**
- * 应用内的页面路由。
+import kotlinx.serialization.Serializable
+
+/*
+ * 页面路由（官方 Navigation Compose 的类型安全路由）。
  *
- * @description 目前只有两个页面（首页、播放页），先不引导航库，用一个 sealed interface 就够了；
- * 以后页面变多再换成 Navigation Compose 也只是把这里的跳转换成 route 字符串。
+ * 为什么从自研路由换过来：自研那套只有一个 `route` 状态，**没有返回栈也没有状态保存**——
+ * 从二级页返回时上一个页面会被重新创建，列表、滚动位置、搜索关键字都得重新来一遍。
+ * 官方的 NavHost 会给每个目的地保存状态（`rememberSaveable` / 滚动位置都会恢复），
+ * 返回栈也天然支持「播放页里的推荐点进去 → 返回回到上一个播放页」这种层级返回。
  *
- * 移动端没有独立详情页：点任意番剧卡片都直接进播放页，播放页自己去后端取详情。
+ * 路由用 `@Serializable` 数据类/数据对象描述，参数直接是强类型字段，
+ * 不用拼字符串、也不会出现「少个斜杠」的问题。
  */
-sealed interface AppRoute {
-    /**
-     * 启动页：做初始化（拉资料 + 检查更新），完成后自动进首页
-     */
-    data object Splash : AppRoute
 
-    /** 首页（底部两个 Tab：主页 / 全部动漫） */
-    data object Home : AppRoute
+/** 启动页：初始化（拉资料 + 检查更新 + 清理更新残留），完成后自动进首页 */
+@Serializable
+data object SplashRoute
 
-    /**
-     * 搜索页（首页顶栏那个假搜索框点进来）
-     */
-    data object Search : AppRoute
+/** 首页（底部三个 Tab：主页 / 番剧 / 用户） */
+@Serializable
+data object HomeRoute
 
-    /**
-     * 观看历史页（用户 Tab 的「历史记录」入口）
-     */
-    data object History : AppRoute
+/** 搜索页 */
+@Serializable
+data object SearchRoute
 
-    /**
-     * 设置页（用户 Tab 的「设置」入口）
-     */
-    data object Settings : AppRoute
+/** 观看历史页 */
+@Serializable
+data object HistoryRoute
 
-    /**
-     * 播放页。
-     *
-     * @param animeId 番剧 id
-     * @param startEpisodeId 指定从哪一集开始（历史记录/继续观看进来时用）；null = 按本地进度或第一集
-     * @param startPositionMs 指定从哪一秒开始（与 startEpisodeId 配套）
-     */
-    data class Play(
-        val animeId: Int,
-        val startEpisodeId: Int? = null,
-        val startPositionMs: Long = 0L,
-    ) : AppRoute
-}
+/** 设置页 */
+@Serializable
+data object SettingsRoute
+
+/**
+ * 播放页。
+ *
+ * @param animeId 番剧 id
+ * @param startEpisodeId 指定从哪一集开始（历史记录 / 继续观看进来时用）；null = 按本地进度或第一集
+ * @param startPositionMs 指定从哪一秒开始（与 startEpisodeId 配套）
+ */
+@Serializable
+data class PlayRoute(
+    val animeId: Int,
+    val startEpisodeId: Int? = null,
+    val startPositionMs: Long = 0L,
+)
