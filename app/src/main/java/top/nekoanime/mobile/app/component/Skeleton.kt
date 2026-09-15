@@ -72,13 +72,15 @@ fun SkeletonBlock(modifier: Modifier = Modifier, shape: Shape = RoundedCornerSha
 /**
  * 番剧海报卡片的骨架（封面 + 两行标题）。
  *
- * @param width 卡片宽度
+ * @description 尺寸跟 {@link AnimePosterCard} 对齐：封面比例 0.72、文字区高 50dp。
+ * 宽度由调用方给：横滑行里是固定 120dp，网格里是「填满这一格」（网格列宽是等分的，不是 120dp）。
+ *
+ * @param modifier 尺寸约束（默认 120dp，跟横滑行里的卡片一致）
  */
 @Composable
-fun AnimePosterSkeleton(width: Dp = PosterCardWidth) {
+fun AnimePosterSkeleton(modifier: Modifier = Modifier.width(PosterCardWidth)) {
     Column(
-        modifier = Modifier
-            .width(width)
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface),
     ) {
@@ -103,6 +105,33 @@ fun AnimePosterSkeleton(width: Dp = PosterCardWidth) {
 }
 
 /**
+ * 一排骨架卡片（横向）。
+ *
+ * @description **必须**是横向可滚的：跟真实 `LazyRow` 一样，卡片保持原宽、放不下的最后一张被视口裁掉。
+ * 如果改用普通 `Row`，Compose 会把放不下的卡片压窄，骨架看起来就跟真实卡片不是一回事了。
+ *
+ * @param count 放几张（真实行一般最多显示 2~3 张，多的本来就要滑）
+ * @param startPadding 左边距（首页行是 0，因为外层已经有页面内边距；播放页推荐是 12dp）
+ * @param topPadding 距离标题的行距（真实行是 10dp）
+ */
+@Composable
+fun SkeletonPosterRow(
+    count: Int = 3,
+    startPadding: Dp = 0.dp,
+    topPadding: Dp = 10.dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(start = startPadding, top = topPadding),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        repeat(count) { AnimePosterSkeleton() }
+    }
+}
+
+/**
  * 番剧网格骨架（「全部动漫」/ 搜索结果的加载态）。
  *
  * @param rows 占位行数
@@ -121,7 +150,8 @@ fun AnimeGridSkeleton(rows: Int = 3, columns: Int = 3) {
             ) {
                 repeat(columns) {
                     Box(modifier = Modifier.weight(1f)) {
-                        AnimePosterSkeleton(width = PosterCardWidth)
+                        // 网格里卡片是「填满等分出来的一格」，不是固定 120dp
+                        AnimePosterSkeleton(modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -131,6 +161,9 @@ fun AnimeGridSkeleton(rows: Int = 3, columns: Int = 3) {
 
 /**
  * 首页骨架：头图 + 两个题材行。
+ *
+ * @description 结构对着首页真实布局来：头图 16:9；每个题材行是 {@link SectionHeader}
+ * （4×16 主色条 + 标题）+ 一条横滑卡片行（卡片 120dp、间距 8dp、贴页面内边距）。
  */
 @Composable
 fun HomeSkeleton() {
@@ -147,11 +180,22 @@ fun HomeSkeleton() {
 
         repeat(2) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SkeletonBlock(modifier = Modifier.width(120.dp).height(16.dp), shape = RoundedCornerShape(4.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    repeat(3) { AnimePosterSkeleton() }
+                // 板块标题：左边一条主色竖条 + 标题文字占位
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SkeletonBlock(
+                        modifier = Modifier.size(width = 4.dp, height = 16.dp),
+                        shape = RoundedCornerShape(2.dp),
+                    )
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(width = 120.dp, height = 16.dp),
+                        shape = RoundedCornerShape(4.dp),
+                    )
                 }
+
+                // 卡片行：首页行没有额外左边距（外层已经有 8dp 页面内边距）
+                SkeletonPosterRow(count = 3, startPadding = 0.dp, topPadding = 0.dp)
             }
         }
     }
@@ -387,18 +431,8 @@ fun PlaySkeleton() {
                     )
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // 横向可滚 + 只留左边内边距：卡片保持 120dp 原宽，
-                        // 最后一张被视口裁掉一部分（跟真实 LazyRow 的观感一致），
-                        // 不然 Row 会把放不下的卡片压窄，看着就不是那个卡片了
-                        .horizontalScroll(rememberScrollState())
-                        .padding(start = 12.dp, top = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    repeat(3) { AnimePosterSkeleton() }
-                }
+                // 卡片行：播放页推荐是「左边 12dp + 距标题 10dp」的横滑行
+                SkeletonPosterRow(count = 3, startPadding = 12.dp, topPadding = 10.dp)
             }
         }
     }
