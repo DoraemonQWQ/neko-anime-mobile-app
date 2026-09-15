@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -195,10 +196,13 @@ fun HistorySkeleton(rows: Int = 5) {
 /**
  * 播放页骨架。
  *
- * @description 按播放页的真实结构摆占位，而不是随便几块灰条：
- * 1. 上半部分是**固定黑色**的区域（状态栏留白 + 16:9 播放器，跟 NekoPlayer 一样）；
- * 2. 播放器以下跟软件主题色走：固定的「选集」区（标题 + 选集条），
- *    再往下是可滚动区的番剧信息卡片（竖版封面 + 右侧信息）与推荐行。
+ * @description 每个尺寸都对着真实组件抄（改真实组件时这里要一起改）：
+ * - 上半部分是**固定黑色**区域：状态栏留白 + 16:9 播放器（`PlayScreen.playerModifier`）；
+ * - 下面是主题背景，第一块是**选集卡片**（`EpisodeSection`）：surface 底 + 上下 12dp 内边距，
+ *   标题行是 4×16 主色条 + 「选集」+「共 N 集」+ 右侧「展开」，选集条是 48×48 的按钮、间距 8dp、左右内边距 12dp；
+ * - 再往下是**番剧信息卡片**（`AnimeInfoCard`）：96dp 竖版封面（比例 0.72 → 高 133dp）+ 右侧信息 + 右下追番按钮，
+ *   下面还有题材标签与简介占位；
+ * - 最后是**推荐卡片**（`RecommendSection`）：标题 + 120dp 横滑卡片。
  */
 @Composable
 fun PlaySkeleton() {
@@ -222,49 +226,173 @@ fun PlaySkeleton() {
             )
         }
 
-        // 固定区：选集（标题一行 + 选集条一行）
+        // ===== 固定区：选集卡片（对外是 12dp 左右 + 12dp 上边距，内部 surface 底 + 上下 12dp）=====
         Column(
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp, top = 12.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(vertical = 12.dp),
         ) {
-            SkeletonBlock(modifier = Modifier.width(140.dp).height(18.dp), shape = RoundedCornerShape(4.dp))
+            // 标题行：4×16 主色条 + 「选集」+「共 N 集」+ 右侧「展开」
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SkeletonBlock(
+                    modifier = Modifier.size(width = 4.dp, height = 16.dp),
+                    shape = RoundedCornerShape(2.dp),
+                )
+                SkeletonBlock(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(width = 32.dp, height = 14.dp),
+                    shape = RoundedCornerShape(4.dp),
+                )
+                SkeletonBlock(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(width = 48.dp, height = 12.dp),
+                    shape = RoundedCornerShape(4.dp),
+                )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(modifier = Modifier.weight(1f))
+
+                SkeletonBlock(
+                    modifier = Modifier.size(width = 56.dp, height = 18.dp),
+                    shape = RoundedCornerShape(6.dp),
+                )
+            }
+
+            // 选集条：48×48 的按钮，间距 8dp，左右内边距 12dp，距标题 10dp
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 repeat(5) {
                     SkeletonBlock(
-                        modifier = Modifier.size(width = 56.dp, height = 34.dp),
-                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.size(48.dp),
+                        shape = RoundedCornerShape(8.dp),
                     )
                 }
             }
         }
 
-        // 可滚动区：番剧信息卡片 + 推荐
+        // ===== 可滚动区：番剧信息卡片 + 推荐卡片 =====
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SkeletonBlock(
-                    modifier = Modifier.size(width = 96.dp, height = 136.dp),
-                    shape = RoundedCornerShape(6.dp),
-                )
+            // 番剧信息卡片：surface 底 + 12dp 内边距
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(12.dp),
+            ) {
+                Row {
+                    // 竖版封面：96dp，比例 0.72 → 高 133dp
+                    SkeletonBlock(
+                        modifier = Modifier.size(width = 96.dp, height = 133.dp),
+                        shape = RoundedCornerShape(6.dp),
+                    )
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    // 右层：上边是标题/评分/更新日，下边是追番按钮（贴着封面底部，跟真实卡片一致）
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(133.dp)
+                            .padding(start = 12.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SkeletonBlock(
+                                modifier = Modifier.fillMaxWidth(0.9f).height(16.dp),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                            SkeletonBlock(
+                                modifier = Modifier.width(80.dp).height(12.dp),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                            SkeletonBlock(
+                                modifier = Modifier.width(120.dp).height(12.dp),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                        }
+
+                        SkeletonBlock(
+                            modifier = Modifier
+                                .align(Alignment.End)
+                                .size(width = 76.dp, height = 32.dp),
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                    }
+                }
+
+                // 题材标签
+                Row(
+                    modifier = Modifier.padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.7f).height(16.dp), shape = RoundedCornerShape(4.dp))
-                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp), shape = RoundedCornerShape(4.dp))
-                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.9f).height(12.dp), shape = RoundedCornerShape(4.dp))
-                    SkeletonBlock(modifier = Modifier.width(88.dp).height(32.dp), shape = RoundedCornerShape(6.dp))
+                    repeat(4) {
+                        SkeletonBlock(
+                            modifier = Modifier.size(width = 52.dp, height = 22.dp),
+                            shape = RoundedCornerShape(4.dp),
+                        )
+                    }
+                }
+
+                // 简介（几行）
+                Column(
+                    modifier = Modifier.padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth().height(12.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth().height(12.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.55f).height(12.dp), shape = RoundedCornerShape(4.dp))
                 }
             }
 
-            SkeletonBlock(modifier = Modifier.width(120.dp).height(18.dp), shape = RoundedCornerShape(4.dp))
+            // 推荐卡片：标题（只有「推荐」，没有副标题）+ 120dp 横滑卡片
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(vertical = 12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SkeletonBlock(
+                        modifier = Modifier.size(width = 4.dp, height = 16.dp),
+                        shape = RoundedCornerShape(2.dp),
+                    )
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(width = 40.dp, height = 16.dp),
+                        shape = RoundedCornerShape(4.dp),
+                    )
+                }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                repeat(3) { AnimePosterSkeleton() }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    repeat(3) { AnimePosterSkeleton() }
+                }
             }
         }
     }

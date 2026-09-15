@@ -49,7 +49,6 @@ fun RecommendSection(
     ) {
         SectionHeader(
             title = "推荐",
-            subtitle = "按题材",
             modifier = Modifier.padding(horizontal = 12.dp),
         )
 
