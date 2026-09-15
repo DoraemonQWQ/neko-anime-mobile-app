@@ -45,6 +45,60 @@ object ApiClient {
     @Volatile
     var authToken: String? = null
 
+    /** 错误详情最多截取多少字符（后端偶尔会回一大段 JSON，界面放不下也没必要） */
+    private const val MaxErrorDetailLength = 180
+
+    /** 地址配置有问题时给用户看的文案（具体地址只写日志） */
+    private const val AddressErrorMessage = "请求地址配置有误，请检查网络设置"
+
+    /**
+     * 组装「给用户看的」请求失败文案。
+     *
+     * @description **不带接口路径**：路径是内部实现细节，暴露给用户既没用也不安全
+     * （而且会出现在弹框里，比如登录失败）。排查问题看日志 —— 这里会单独打一条含路径与响应体的记录。
+     *
+     * @param path 接口路径（只用于日志）
+     * @param code HTTP 状态码
+     * @param detail 后端返回的说明（可为空字符串）
+     * @returns 给用户看的提示：优先用后端的说明，其次按状态码给通用文案
+     */
+    private fun failureMessage(path: String, code: Int, detail: String = ""): String {
+        val text = detail.trim().take(MaxErrorDetailLength)
+
+        Log.w("NekoApi", "请求失败 $path -> HTTP $code${if (text.isEmpty()) "" else "：$text"}")
+
+        return text.ifEmpty { statusMessage(code) }
+    }
+
+    /**
+     * HTTP 状态码 → 通用提示文案。
+     *
+     * @param code 状态码
+     * @returns 提示文案
+     */
+    private fun statusMessage(code: Int): String = when (code) {
+        400 -> "请求有误，请稍后再试"
+        401 -> "登录已过期，请重新登录"
+        403 -> "没有权限执行该操作"
+        404 -> "请求的内容不存在"
+        408 -> "请求超时，请稍后再试"
+        429 -> "操作太频繁，请稍后再试"
+        500, 502, 503, 504 -> "服务器开小差了，请稍后再试"
+        else -> "请求失败（$code）"
+    }
+
+    /**
+     * 地址不合法时抛出的异常。
+     *
+     * @param detail 出错细节（只写日志）
+     * @returns 抛给上层的异常（消息里不含地址）
+     */
+    private fun addressError(detail: String): IllegalStateException {
+        Log.e("NekoApi", detail)
+
+        return IllegalStateException(AddressErrorMessage)
+    }
+
     /**
      * 模拟网络延迟（毫秒）。
      *
@@ -75,7 +129,7 @@ object ApiClient {
         runCatching {
             applyMockDelay()
             val url = (ConfigLoader.config.api.baseUrl + path).toHttpUrlOrNull()
-                ?: error("接口地址不合法：$path")
+                ?: throw addressError("接口地址不合法：$path")
             val urlWithQuery = url.newBuilder().apply {
                 query.forEach { (key, value) -> addQueryParameter(key, value) }
             }.build()
@@ -89,7 +143,7 @@ object ApiClient {
                 val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error("接口 $path 返回 ${response.code}：${body.take(180)}")
+                    error(failureMessage(path, response.code, body))
                 }
 
                 json.decodeFromString(serializer, body)
@@ -113,13 +167,13 @@ object ApiClient {
     ): Result<T> = withContext(Dispatchers.IO) {
         runCatching {
             applyMockDelay()
-            val target = url.toHttpUrlOrNull() ?: error("地址不合法：$url")
+            val target = url.toHttpUrlOrNull() ?: throw addressError("地址不合法：$url")
             val request = Request.Builder().url(target).get().build()
 
             http.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    error("请求 $url 返回 ${response.code}")
+                    error(failureMessage(url, response.code))
                 }
 
                 json.decodeFromString(serializer, body)
@@ -144,7 +198,7 @@ object ApiClient {
         runCatching {
             applyMockDelay()
             val url = (ConfigLoader.config.api.baseUrl + path).toHttpUrlOrNull()
-                ?: error("接口地址不合法：$path")
+                ?: throw addressError("接口地址不合法：$path")
 
             val bodyText = json.encodeToString(bodySerializer, body)
             val request = Request.Builder()
@@ -157,7 +211,7 @@ object ApiClient {
                 val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error("接口 $path 返回 ${response.code}：${body.take(180)}")
+                    error(failureMessage(path, response.code, body))
                 }
 
                 json.decodeFromString(serializer, body)
@@ -189,7 +243,7 @@ object ApiClient {
         runCatching {
             applyMockDelay()
             val url = (ConfigLoader.config.api.baseUrl + path).toHttpUrlOrNull()
-                ?: error("接口地址不合法：$path")
+                ?: throw addressError("接口地址不合法：$path")
 
             val bodyText = json.encodeToString(bodySerializer, body)
             val request = Request.Builder()
@@ -202,7 +256,7 @@ object ApiClient {
                 val text = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error("接口 $path 返回 ${response.code}：${text.take(180)}")
+                    error(failureMessage(path, response.code, text))
                 }
 
                 text.trim()
@@ -228,7 +282,7 @@ object ApiClient {
         runCatching {
             applyMockDelay()
             val url = (ConfigLoader.config.api.baseUrl + path).toHttpUrlOrNull()
-                ?: error("接口地址不合法：$path")
+                ?: throw addressError("接口地址不合法：$path")
 
             val bodyText = json.encodeToString(bodySerializer, body)
             val request = Request.Builder()
@@ -240,7 +294,7 @@ object ApiClient {
             http.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    error("接口 $path 返回 ${response.code}：${text.take(180)}")
+                    error(failureMessage(path, response.code, text))
                 }
             }
         }.onFailure { error -> Log.w("NekoApi", "请求失败 $path -> ${error.message}") }
@@ -257,7 +311,7 @@ object ApiClient {
     suspend fun putBytes(url: String, bytes: ByteArray, contentType: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val target = url.toHttpUrlOrNull() ?: error("直传地址不合法")
+                val target = url.toHttpUrlOrNull() ?: throw addressError("直传地址不合法：$url")
                 val request = Request.Builder()
                     .url(target)
                     .put(bytes.toRequestBody(contentType.toMediaType()))
@@ -265,7 +319,7 @@ object ApiClient {
 
                 http.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
-                        error("直传失败：${response.code}")
+                        error(failureMessage(url, response.code))
                     }
                 }
             }.onFailure { error -> Log.w("NekoApi", "直传失败 -> ${error.message}") }
