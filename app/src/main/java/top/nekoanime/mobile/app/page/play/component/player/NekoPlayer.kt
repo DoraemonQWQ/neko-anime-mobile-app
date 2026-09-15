@@ -834,8 +834,10 @@ fun NekoPlayer(
                     hudPinned = false
                     hud = null
                 },
-                // 首次加载期间只露顶栏：返回键必须留在，但进度条/倍速/锁定这些现在都是空信息
-                topBarOnly = firstLoading,
+                // 首次加载成功之前一律只露顶栏：进度条、时长、倍速、锁定键这些内容
+                // 都建立在"视频已经就绪"之上，没成功之前摆出来全是空信息（失败了也一样）。
+                // 顶栏必须留着——返回/主页是用户唯一的出路。
+                topBarOnly = !firstLoadDone,
                 modifier = Modifier.fillMaxSize(),
                 // 上下集按钮同样只在全屏显示（竖屏时选集列表就在播放器下面）
                 previousEpisode = if (fullscreen) {
