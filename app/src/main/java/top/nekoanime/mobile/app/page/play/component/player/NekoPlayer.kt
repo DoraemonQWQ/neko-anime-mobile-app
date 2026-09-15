@@ -235,6 +235,26 @@ fun NekoPlayer(
     // 只记"出错了没有"这一个布尔值：具体错误码、错误信息、堆栈一律只写 logcat（见 onPlayerError），
     // 界面上只给用户一句"播放失败"+ 重试按钮，不把播放器的原始报错糊到用户脸上
     var hasError by remember { mutableStateOf(false) }
+
+    /**
+     * 首次加载是否已经完成（画面第一帧真正就绪）。
+     *
+     * @description 首次加载期间：控制栏常驻但**只露顶栏**，并且禁用双击跳转 / 拖动进度 / 长按倍速。
+     * 切集不算首次加载（那是同一个播放会话里的换源），所以这个值一旦为 true 就不再回落。
+     *
+     * 初值直接读播放器状态：从推荐页返回本页时播放器早就是 READY 了，
+     * 若固定从 false 起步，返回的那一瞬间会闪一下"加载中"的顶栏-only 状态。
+     */
+    var firstLoadDone by remember(player) {
+        mutableStateOf(player.playbackState == Player.STATE_READY)
+    }
+
+    /** 首次加载进行中（出错时不算：出错走"播放失败"那套常驻控制栏） */
+    val firstLoading = !firstLoadDone && !hasError
+
+    /** 控制栏是否被强制常驻：首次加载中、或播放失败时，用户不能主动收起，也不会自动隐藏 */
+    val controlsPinned = firstLoading || hasError
+
     var buffering by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var locked by remember { mutableStateOf(false) }
@@ -273,11 +293,21 @@ fun NekoPlayer(
 
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
+
+                // 第一帧就绪：首次加载结束，手势与整条控制栏全部放开
+                if (state == Player.STATE_READY) {
+                    firstLoadDone = true
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 // 报错细节只进日志：现场排查靠这行（错误码 + 底层信息 + 堆栈全在）
                 hasError = true
+
+                // 出错时把控制栏亮出来：返回键、主页键都在里面，
+                // 不然用户一上来看到"播放失败"却连退出去的按钮都找不到
+                controlsVisible = true
+
                 android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName} / ${error.message}", error)
             }
         }
@@ -309,6 +339,14 @@ fun NekoPlayer(
 
         if (player.mediaItemCount > 0 && currentUrl == url) {
             loadedEpisodeId.intValue = episode.id
+
+            // 上次会话是停在出错状态（idle）的：这时候光 play() 不会重新加载，
+            // 必须先 prepare 才会再去请求一次，否则返回本页就是一块永远不动的黑屏
+            if (player.playbackState == Player.STATE_IDLE) {
+                android.util.Log.i("NekoPlayer", "媒体源未变但播放器停在 idle，重新 prepare")
+                player.prepare()
+            }
+
             player.play()
             android.util.Log.i("NekoPlayer", "媒体源未变，直接续播（不重新加载）")
 
@@ -396,8 +434,9 @@ fun NekoPlayer(
     // - 操作进行中（interactingCount > 0，比如按住不放、一直拖进度条）**暂停计时**，
     //   不会出现"手指还在屏幕上，控制栏自己消失了"；
     // - 抽屉展开期间同样不隐藏。
-    LaunchedEffect(controlsVisible, interactionTick, interactingCount, drawerOpen) {
-        if (controlsVisible && !drawerOpen && interactingCount == 0) {
+    // - 首次加载 / 播放失败时会话被钉住（controlsPinned），根本不该起这个计时。
+    LaunchedEffect(controlsVisible, interactionTick, interactingCount, drawerOpen, controlsPinned) {
+        if (controlsVisible && !drawerOpen && interactingCount == 0 && !controlsPinned) {
             delay(ControlsAutoHideMillis)
             controlsVisible = false
             android.util.Log.i("NekoPlayer", "控制栏 5 秒无操作，自动隐藏")
@@ -568,10 +607,15 @@ fun NekoPlayer(
                 .playerGestures(
                     // 抽屉展开时关掉播放器手势：抽屉是模态浮层，
                     // 这时在阴影/抽屉上滑动不该再改播放进度或亮度音量
-                    enabled = !hasError && !drawerOpen,
+                    enabled = !drawerOpen,
                     locked = locked,
+                    // 首次加载没完成、或者播放失败时：双击跳转 / 双击播放暂停 / 拖动进度 / 长按倍速全关。
+                    // 单击仍然保留——控制栏要通过它显隐（不过这两种状态下控制栏本来就被钉住不隐藏）。
+                    // 竖直拖动（亮度 / 音量）不受影响，加载期间照样能调。
+                    advancedGesturesEnabled = firstLoadDone && !hasError,
                     // 锁定后单击依然可以显隐控制栏（解锁键跟着一起动），其它手势在 PlayerGestures 里被忽略
-                    onTap = { controlsVisible = !controlsVisible },
+                    // 常驻状态（首次加载 / 播放失败）下点击画面不做任何事，避免用户把返回键点没了
+                    onTap = { if (!controlsPinned) controlsVisible = !controlsVisible },
                     onDoubleTap = { fraction ->
                         if (!locked) {
                             when {
@@ -719,7 +763,8 @@ fun NekoPlayer(
 
         // 暂停时画面中央的大播放按钮（B 站 也是这样：暂停后中间有个明显的 ▶，点一下继续）。
         // 控制栏里已经没有播放/暂停按钮了，这个就是"恢复播放"最直观的入口。
-        if (!playing && !buffering && !hasError && !locked) {
+        // 首次加载没完成时不显示（那时画面还没出来，摆个播放键只会让人以为能播起来了）
+        if (!playing && !buffering && !hasError && !locked && firstLoadDone) {
             IconButton(
                 onClick = { player.play() },
                 modifier = Modifier
@@ -740,8 +785,9 @@ fun NekoPlayer(
         // 控制栏：点击画面显隐。整块铺满播放区（顶栏贴上、底栏贴下），
         // 中间是空的、没有任何 pointerInput，所以双击/滑动这些手势照常穿透到下面的手势层。
         AnimatedVisibility(
-            // 锁定后也走同一套显隐逻辑：单击画面照旧显示/隐藏，解锁键跟着一起出现或收掉
-            visible = controlsVisible,
+            // 锁定后也走同一套显隐逻辑：单击画面照旧显示/隐藏，解锁键跟着一起出现或收掉。
+            // 首次加载 / 播放失败时 controlsPinned 为真 → 一直显示，用户点画面也收不掉。
+            visible = controlsVisible || controlsPinned,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.matchParentSize(),
@@ -788,6 +834,8 @@ fun NekoPlayer(
                     hudPinned = false
                     hud = null
                 },
+                // 首次加载期间只露顶栏：返回键必须留在，但进度条/倍速/锁定这些现在都是空信息
+                topBarOnly = firstLoading,
                 modifier = Modifier.fillMaxSize(),
                 // 上下集按钮同样只在全屏显示（竖屏时选集列表就在播放器下面）
                 previousEpisode = if (fullscreen) {

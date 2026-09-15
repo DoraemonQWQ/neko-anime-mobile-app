@@ -60,6 +60,9 @@ private const val DragStartHoldMs = 80L
  *
  * @param enabled 是否启用手势（未加载出视频时可以关掉）
  * @param locked 是否处于锁定状态
+ * @param advancedGesturesEnabled 是否允许「双击快进快退 / 双击播放暂停 / 水平拖动调进度 / 长按倍速」。
+ * 首次加载（画面还没就绪）传 false：这时候拖动进度没有意义，长按加速也只会和加载打架。
+ * 竖直拖动（左半屏亮度、右半屏音量）**不受它影响**，加载期间照样能调。
  * @param onTap 单击
  * @param onDoubleTap 双击，参数是点击位置在整屏宽度里的比例（0f~1f）
  * @param onSeekDrag 水平拖动，参数是本次位移占宽度的比例（正数向右）
@@ -77,6 +80,7 @@ private const val DragStartHoldMs = 80L
 fun Modifier.playerGestures(
     enabled: Boolean,
     locked: Boolean,
+    advancedGesturesEnabled: Boolean = true,
     onTap: () -> Unit,
     onDoubleTap: (positionFraction: Float) -> Unit,
     onSeekDrag: (deltaFraction: Float) -> Unit,
@@ -89,7 +93,7 @@ fun Modifier.playerGestures(
     onInteractionEnd: () -> Unit = {},
     topSafeZonePx: Float = 0f,
 ): Modifier = this
-    .pointerInput(enabled, locked, topSafeZonePx) {
+    .pointerInput(enabled, locked, advancedGesturesEnabled, topSafeZonePx) {
         // 注意：锁定后**仍然要保留单击**，否则锁屏状态下没法再唤出/收起控制栏（解锁键也就找不到了）。
         // 双击、长按、滑动在锁定状态下全部忽略。
         if (!enabled) {
@@ -120,7 +124,7 @@ fun Modifier.playerGestures(
                     return@detectTapGestures
                 }
 
-                if (!locked) {
+                if (!locked && advancedGesturesEnabled) {
                     Log.d("NekoGesture", "doubleTap x=${offset.x}")
                     onDoubleTap((offset.x / size.width).coerceIn(0f, 1f))
                 }
@@ -130,8 +134,8 @@ fun Modifier.playerGestures(
                     return@detectTapGestures
                 }
 
-                // 锁定状态下不进入长按倍速
-                if (locked) {
+                // 锁定状态、以及首次加载期间（倍速会和加载打架）都不进入长按倍速
+                if (locked || !advancedGesturesEnabled) {
                     return@detectTapGestures
                 }
 
@@ -155,7 +159,7 @@ fun Modifier.playerGestures(
             },
         )
     }
-    .pointerInput(enabled, locked, topSafeZonePx) {
+    .pointerInput(enabled, locked, advancedGesturesEnabled, topSafeZonePx) {
         if (!enabled || locked) {
             return@pointerInput
         }
@@ -193,7 +197,12 @@ fun Modifier.playerGestures(
             /** 把一次位移交给当前锁定的方向（水平=进度，竖直=亮度/音量） */
             fun dispatch(motion: Offset) {
                 when (axis) {
-                    DragAxis.Horizontal -> onSeekDrag(motion.x / size.width)
+                    // 首次加载期间水平拖动（调进度）直接忽略：方向已经锁定为水平，
+                    // 就不该再转去当亮度/音量，所以是"什么都不做"而不是改走竖直分支
+                    DragAxis.Horizontal -> if (advancedGesturesEnabled) {
+                        onSeekDrag(motion.x / size.width)
+                    }
+
                     DragAxis.Vertical -> onVerticalDrag(
                         (startX / size.width).coerceIn(0f, 1f),
                         -motion.y / size.height,
@@ -249,7 +258,8 @@ fun Modifier.playerGestures(
             }
 
             when (axis) {
-                DragAxis.Horizontal -> onSeekEnd()
+                // 同上：加载期间没有下发过拖动预览，松手自然也不该真的去 seek
+                DragAxis.Horizontal -> if (advancedGesturesEnabled) onSeekEnd()
                 DragAxis.Vertical -> onVerticalDragEnd()
                 DragAxis.Unknown -> Unit
             }

@@ -119,6 +119,9 @@ private val NoInsets = WindowInsets(0, 0, 0, 0)
  * @param onInteractionEnd 拖完进度条：自动隐藏重新开始计时
  * @param onSeekPreview 拖动进度条过程中回报目标位置（播放器用它显示中央的指示框）
  * @param onSeekPreviewEnd 拖动进度条结束（把指示框收掉）
+ * @param topBarOnly 只显示顶栏（返回 / 主页 / 标题），不显示底部操作栏和右侧锁定键。
+ * 首次加载期间用：进度、时长、倍速、锁定这时候全是无效信息，摆出来只会让人以为可以操作；
+ * 但返回键必须留着，否则用户会被困在加载页里。
  */
 @Composable
 fun PlayerControls(
@@ -147,6 +150,7 @@ fun PlayerControls(
     onInteractionEnd: () -> Unit = {},
     onSeekPreview: (Long) -> Unit = {},
     onSeekPreviewEnd: () -> Unit = {},
+    topBarOnly: Boolean = false,
 ) {
     // 倍速按钮：不要涟漪（播放器控件追求轻量）
     val speedInteraction = remember { MutableInteractionSource() }
@@ -264,205 +268,208 @@ fun PlayerControls(
                 }
 
                 // ===== 下：上下集/播放（仅全屏）+ 时间 + 进度条 + 时长 + 倍速 + 选集 + 全屏 =====
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)),
-                            ),
-                        ),
-                ) {
-                    Row(
+                // 首次加载期间整条都不画（见 topBarOnly 的说明）
+                if (!topBarOnly) {
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .windowInsetsPadding(bottomInsets)
-                            .padding(start = 8.dp, end = 2.dp, top = 8.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // 上一集：没有上一集时整块不显示（跟 web 一致），不是禁用而是隐藏
-                        if (previousEpisode != null) {
-                            IconButton(
-                                onClick = {
-                                    onUserInteraction()
-                                    previousEpisode()
-                                },
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SkipPrevious,
-                                    contentDescription = "上一集",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(ControlIconSize),
-                                )
-                            }
-                        }
-
-                        // 播放/暂停：只在全屏显示（非全屏交给双击画面中间 + 中央那个大播放键）
-                        if (onTogglePlay != null) {
-                            IconButton(
-                                onClick = {
-                                    onUserInteraction()
-                                    onTogglePlay()
-                                },
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Icon(
-                                    imageVector = if (playing) {
-                                        Icons.Filled.Pause
-                                    } else {
-                                        Icons.Filled.PlayArrow
-                                    },
-                                    contentDescription = if (playing) "暂停" else "播放",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(ControlIconSize),
-                                )
-                            }
-                        }
-
-                        // 下一集：没有下一集时同样直接隐藏
-                        if (nextEpisode != null) {
-                            IconButton(
-                                onClick = {
-                                    onUserInteraction()
-                                    nextEpisode()
-                                },
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SkipNext,
-                                    contentDescription = "下一集",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(ControlIconSize),
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 6.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            // 自己画的轨道：未播放 / 已缓冲 / 已播放 三段 + 白色圆点
-                            ProgressTrack(
-                                fraction = fraction,
-                                bufferedFraction = bufferedFraction,
-                                dragging = dragging,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(24.dp),
-                            )
-
-                            // 透明 Slider：只负责拖动与无障碍，视觉全部交给上面的 Canvas。
-                            // 这样进度条的观感完全可控，触摸手感还是 Slider 那套（含拖动结束回调）。
-                            Slider(
-                                value = fraction.coerceIn(0f, 1f),
-                                onValueChange = { value ->
-                                    // 拖动开始：这期间自动隐藏暂停计时（拖多久都不该自己消失）
-                                    if (!dragging) {
-                                        onInteractionStart()
-                                    }
-
-                                    // 只更新本地预览，不在这里 seek：拖动中反复 seek 会被实时位置回调覆盖，造成回溯
-                                    dragging = true
-                                    dragMs = (value * durationMs).toLong().coerceIn(0L, durationMs)
-                                    // 拖进度条也弹中央指示框（跟手势横滑一样，显示目标时间）
-                                    onSeekPreview(dragMs)
-                                },
-                                onValueChangeFinished = {
-                                    // 松手才真正跳转，并且立刻结束本地拖动状态
-                                    val target = dragMs
-                                    android.util.Log.i("NekoPlayer", "进度条松手 target=${target / 1000}s")
-                                    dragging = false
-                                    onInteractionEnd()
-                                    onSeekPreviewEnd()
-                                    onSeek(target)
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color.Transparent,
-                                    activeTrackColor = Color.Transparent,
-                                    inactiveTrackColor = Color.Transparent,
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)),
                                 ),
-                            )
-                        }
-
-                        // 当前/总时长：固定格式（分钟补零）+ 等宽数字 + 最小宽度，
-                        // 这样数字从 9 变 10 的时候宽度也不会跳，右边的按钮就不会被顶来顶去
-                        Text(
-                            text = progressText,
-                            color = Color.White,
-                            fontSize = ControlTextSize,
-                            style = TabularNumbers,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
+                            ),
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .widthIn(min = TimeTextMinWidth)
-                                .padding(horizontal = 4.dp),
-                        )
-
-                        // 倍速：点一下在 1.0 / 1.25 / 1.5 / 2.0 之间循环。
-                        // B 站 这里是纯文字（没有胶囊底色），1.0 时显示"倍速"。
-                        // 固定宽度：不管文案是"倍速"还是"1.25×"，占位都一样。
-                        Box(
-                            modifier = Modifier
-                                .width(SpeedBoxWidth)
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable(
-                                    interactionSource = speedInteraction,
-                                    indication = null,
+                                .fillMaxWidth()
+                                .windowInsetsPadding(bottomInsets)
+                                .padding(start = 8.dp, end = 2.dp, top = 8.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // 上一集：没有上一集时整块不显示（跟 web 一致），不是禁用而是隐藏
+                            if (previousEpisode != null) {
+                                IconButton(
                                     onClick = {
                                         onUserInteraction()
-                                        onToggleSpeed()
+                                        previousEpisode()
                                     },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.SkipPrevious,
+                                        contentDescription = "上一集",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(ControlIconSize),
+                                    )
+                                }
+                            }
+
+                            // 播放/暂停：只在全屏显示（非全屏交给双击画面中间 + 中央那个大播放键）
+                            if (onTogglePlay != null) {
+                                IconButton(
+                                    onClick = {
+                                        onUserInteraction()
+                                        onTogglePlay()
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = if (playing) {
+                                            Icons.Filled.Pause
+                                        } else {
+                                            Icons.Filled.PlayArrow
+                                        },
+                                        contentDescription = if (playing) "暂停" else "播放",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(ControlIconSize),
+                                    )
+                                }
+                            }
+
+                            // 下一集：没有下一集时同样直接隐藏
+                            if (nextEpisode != null) {
+                                IconButton(
+                                    onClick = {
+                                        onUserInteraction()
+                                        nextEpisode()
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.SkipNext,
+                                        contentDescription = "下一集",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(ControlIconSize),
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                // 自己画的轨道：未播放 / 已缓冲 / 已播放 三段 + 白色圆点
+                                ProgressTrack(
+                                    fraction = fraction,
+                                    bufferedFraction = bufferedFraction,
+                                    dragging = dragging,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(24.dp),
                                 )
-                                .padding(horizontal = 6.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
+
+                                // 透明 Slider：只负责拖动与无障碍，视觉全部交给上面的 Canvas。
+                                // 这样进度条的观感完全可控，触摸手感还是 Slider 那套（含拖动结束回调）。
+                                Slider(
+                                    value = fraction.coerceIn(0f, 1f),
+                                    onValueChange = { value ->
+                                        // 拖动开始：这期间自动隐藏暂停计时（拖多久都不该自己消失）
+                                        if (!dragging) {
+                                            onInteractionStart()
+                                        }
+
+                                        // 只更新本地预览，不在这里 seek：拖动中反复 seek 会被实时位置回调覆盖，造成回溯
+                                        dragging = true
+                                        dragMs = (value * durationMs).toLong().coerceIn(0L, durationMs)
+                                        // 拖进度条也弹中央指示框（跟手势横滑一样，显示目标时间）
+                                        onSeekPreview(dragMs)
+                                    },
+                                    onValueChangeFinished = {
+                                        // 松手才真正跳转，并且立刻结束本地拖动状态
+                                        val target = dragMs
+                                        android.util.Log.i("NekoPlayer", "进度条松手 target=${target / 1000}s")
+                                        dragging = false
+                                        onInteractionEnd()
+                                        onSeekPreviewEnd()
+                                        onSeek(target)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.Transparent,
+                                        activeTrackColor = Color.Transparent,
+                                        inactiveTrackColor = Color.Transparent,
+                                    ),
+                                )
+                            }
+
+                            // 当前/总时长：固定格式（分钟补零）+ 等宽数字 + 最小宽度，
+                            // 这样数字从 9 变 10 的时候宽度也不会跳，右边的按钮就不会被顶来顶去
                             Text(
-                                text = if (speed == 1f) "倍速" else "${speed}×",
+                                text = progressText,
                                 color = Color.White,
                                 fontSize = ControlTextSize,
-                                fontWeight = FontWeight.Medium,
+                                style = TabularNumbers,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .widthIn(min = TimeTextMinWidth)
+                                    .padding(horizontal = 4.dp),
                             )
-                        }
 
-                        // 选集：只在全屏出现，点开是从右侧滑出的抽屉
-                        if (episodeDrawer != null) {
+                            // 倍速：点一下在 1.0 / 1.25 / 1.5 / 2.0 之间循环。
+                            // B 站 这里是纯文字（没有胶囊底色），1.0 时显示"倍速"。
+                            // 固定宽度：不管文案是"倍速"还是"1.25×"，占位都一样。
+                            Box(
+                                modifier = Modifier
+                                    .width(SpeedBoxWidth)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable(
+                                        interactionSource = speedInteraction,
+                                        indication = null,
+                                        onClick = {
+                                            onUserInteraction()
+                                            onToggleSpeed()
+                                        },
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = if (speed == 1f) "倍速" else "${speed}×",
+                                    color = Color.White,
+                                    fontSize = ControlTextSize,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+
+                            // 选集：只在全屏出现，点开是从右侧滑出的抽屉
+                            if (episodeDrawer != null) {
+                                IconButton(
+                                    onClick = {
+                                        onUserInteraction()
+                                        episodeDrawer()
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                                        contentDescription = "选集",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(ControlIconSize),
+                                    )
+                                }
+                            }
+
                             IconButton(
                                 onClick = {
                                     onUserInteraction()
-                                    episodeDrawer()
+                                    onToggleFullscreen()
                                 },
                                 modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                                    contentDescription = "选集",
+                                    imageVector = if (fullscreen) {
+                                        Icons.Filled.FullscreenExit
+                                    } else {
+                                        Icons.Filled.Fullscreen
+                                    },
+                                    contentDescription = if (fullscreen) "退出全屏" else "全屏",
                                     tint = Color.White,
                                     modifier = Modifier.size(ControlIconSize),
                                 )
                             }
-                        }
-
-                        IconButton(
-                            onClick = {
-                                onUserInteraction()
-                                onToggleFullscreen()
-                            },
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Icon(
-                                imageVector = if (fullscreen) {
-                                    Icons.Filled.FullscreenExit
-                                } else {
-                                    Icons.Filled.Fullscreen
-                                },
-                                contentDescription = if (fullscreen) "退出全屏" else "全屏",
-                                tint = Color.White,
-                                modifier = Modifier.size(ControlIconSize),
-                            )
                         }
                     }
                 }
@@ -470,23 +477,26 @@ fun PlayerControls(
         }
 
         // ===== 中：锁定键（右侧竖直居中，锁定/解锁都在这个位置）=====
-        IconButton(
-            onClick = {
-                onUserInteraction()
-                onToggleLock()
-            },
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .windowInsetsPadding(sideInsets)
-                .padding(end = 8.dp)
-                .size(40.dp),
-        ) {
-            Icon(
-                imageVector = if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock,
-                contentDescription = if (locked) "解锁" else "锁定",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp),
-            )
+        // 首次加载期间不显示：还没画面可锁，露一个锁头只是噪声
+        if (!topBarOnly) {
+            IconButton(
+                onClick = {
+                    onUserInteraction()
+                    onToggleLock()
+                },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .windowInsetsPadding(sideInsets)
+                    .padding(end = 8.dp)
+                    .size(40.dp),
+            ) {
+                Icon(
+                    imageVector = if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock,
+                    contentDescription = if (locked) "解锁" else "锁定",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
