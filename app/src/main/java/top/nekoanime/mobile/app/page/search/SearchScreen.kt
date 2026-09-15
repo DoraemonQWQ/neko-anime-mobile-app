@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.AnimePosterCard
 import top.nekoanime.mobile.app.component.NekoSearchBar
 import top.nekoanime.mobile.app.component.rememberSaveableList
+import top.nekoanime.mobile.app.component.AnimeGridSkeleton
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
 import top.nekoanime.mobile.app.model.entity.AnimeBrief
@@ -214,10 +215,12 @@ fun SearchScreen(
             }
 
             results.isEmpty() && loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
             ) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                // 搜索中：先摆卡片骨架，结果出来时是「填充」而不是「蹦出来」
+                AnimeGridSkeleton()
             }
 
             results.isEmpty() -> Box(

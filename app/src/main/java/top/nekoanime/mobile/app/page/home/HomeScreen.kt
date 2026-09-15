@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -53,6 +54,8 @@ import top.nekoanime.mobile.app.R
 import top.nekoanime.mobile.app.component.AnimePosterCard
 import top.nekoanime.mobile.app.component.FilterSelector
 import top.nekoanime.mobile.app.component.LoginDialog
+import top.nekoanime.mobile.app.component.AnimeGridSkeleton
+import top.nekoanime.mobile.app.component.HomeSkeleton
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.AnimeFilterOptions
 import top.nekoanime.mobile.app.config.ConfigLoader
@@ -131,6 +134,8 @@ fun HomeScreen(
     var showLogin by remember { mutableStateOf(false) }
     // 底部 Tab 的点击互动源（三个 Tab 共用一个就够，播放器控件那样不要涟漪）
     val bottomBarInteraction = remember { MutableInteractionSource() }
+    // Tab 之间切换时保存各自的页面状态：切走再切回来，列表/滚动位置都还在，不会重新请求
+    val tabStateHolder = rememberSaveableStateHolder()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -211,18 +216,21 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            when (selectedTab) {
-                HomeTab.Home -> HomeTabContent(onOpenAnime = onOpenAnime, onContinue = onContinue)
-                HomeTab.AnimeList -> AnimeListTab(onOpenAnime = onOpenAnime)
-                HomeTab.User -> UserTab(
-                    loggedIn = SessionState.loggedIn,
-                    username = SessionState.profile?.displayName,
-                    avatarUrl = SessionState.profile?.avatarUrl,
-                    onLoginClick = { showLogin = true },
-                    onLogout = { SessionState.logout() },
-                    onOpenHistory = onOpenHistory,
-                    onOpenSettings = onOpenSettings,
-                )
+            // SaveableStateProvider：切走时把当前 Tab 的 rememberSaveable 状态存下来，切回来再恢复
+            tabStateHolder.SaveableStateProvider(selectedTab.name) {
+                when (selectedTab) {
+                    HomeTab.Home -> HomeTabContent(onOpenAnime = onOpenAnime, onContinue = onContinue)
+                    HomeTab.AnimeList -> AnimeListTab(onOpenAnime = onOpenAnime)
+                    HomeTab.User -> UserTab(
+                        loggedIn = SessionState.loggedIn,
+                        username = SessionState.profile?.displayName,
+                        avatarUrl = SessionState.profile?.avatarUrl,
+                        onLoginClick = { showLogin = true },
+                        onLogout = { SessionState.logout() },
+                        onOpenHistory = onOpenHistory,
+                        onOpenSettings = onOpenSettings,
+                    )
+                }
             }
         }
     }
@@ -306,15 +314,8 @@ private fun HomeTabContent(
             verticalArrangement = Arrangement.spacedBy(SectionSpacing),
         ) {
         when {
-            loading && hot.isEmpty() && rows.isEmpty() ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 80.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                }
+            // 首次加载：直接摆出「头图 + 题材行」骨架，比一个孤零零的转圈更接近最终样子
+            loading && hot.isEmpty() && rows.isEmpty() -> HomeSkeleton()
 
             failed -> Column(
                 modifier = Modifier
@@ -480,6 +481,12 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
             // weight 而不是 fillMaxSize：列里已经有一条筛选栏，占满整列会把列表顶出屏幕
             modifier = Modifier.weight(1f),
         ) {
+        // 首次加载：先摆一屏卡片骨架，避免「空白 → 突然蹦出一堆卡片」
+        if (items.isEmpty() && loading) {
+            Box(modifier = Modifier.fillMaxSize().padding(PagePadding)) {
+                AnimeGridSkeleton()
+            }
+        } else {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(3),
@@ -531,6 +538,7 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
                     )
                 }
             }
+        }
         }
         }
     }

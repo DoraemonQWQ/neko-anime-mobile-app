@@ -87,6 +87,7 @@ private val PlayerBackdropColor = Color.Black
 @Composable
 fun PlayScreen(
     anime: AnimeDetail,
+    player: androidx.media3.exoplayer.ExoPlayer,
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
@@ -165,6 +166,7 @@ fun PlayScreen(
             if (url != null && currentEpisode != null) {
                 // 播放器：全屏与非全屏共用同一个调用点（切全屏不会重建播放器）
                 NekoPlayer(
+                    player = player,
                     episode = currentEpisode,
                     url = url,
                     animeTitle = anime.title,

@@ -1,0 +1,219 @@
+package top.nekoanime.mobile.app.component
+
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/*
+ * 骨架屏。
+ *
+ * 目的：数据还没回来时先摆出「内容大致长什么样」的灰块，而不是只给一个转圈——
+ * 用户知道接下来会出现什么，也不会出现「转圈停住 → 一大块 UI 突然蹦出来」的突兀感。
+ * 灰块用一个很轻的呼吸动画（透明度 0.35 ~ 0.65），不抢视线也不额外耗电。
+ */
+
+/** 骨架块呼吸动画的半周期（毫秒） */
+private const val SkeletonPulseMillis = 700
+
+/**
+ * 一个骨架灰块。
+ *
+ * @param modifier 尺寸约束（宽高由调用方给）
+ * @param shape 形状（默认 8dp 圆角，跟卡片一致）
+ */
+@Composable
+fun SkeletonBlock(modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(8.dp)) {
+    val transition = rememberInfiniteTransition(label = "skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.65f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = SkeletonPulseMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeletonAlpha",
+    )
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)),
+    )
+}
+
+/**
+ * 番剧海报卡片的骨架（封面 + 两行标题）。
+ *
+ * @param width 卡片宽度
+ */
+@Composable
+fun AnimePosterSkeleton(width: Dp = PosterCardWidth) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        SkeletonBlock(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f / 1.39f),
+            shape = RoundedCornerShape(0.dp),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SkeletonBlock(modifier = Modifier.fillMaxWidth().height(10.dp), shape = RoundedCornerShape(4.dp))
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.6f).height(10.dp), shape = RoundedCornerShape(4.dp))
+        }
+    }
+}
+
+/**
+ * 番剧网格骨架（「全部动漫」/ 搜索结果的加载态）。
+ *
+ * @param rows 占位行数
+ * @param columns 每行几个（跟真实网格一致）
+ */
+@Composable
+fun AnimeGridSkeleton(rows: Int = 3, columns: Int = 3) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        repeat(rows) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                repeat(columns) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        AnimePosterSkeleton(width = PosterCardWidth)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 首页骨架：头图 + 两个题材行。
+ */
+@Composable
+fun HomeSkeleton() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // 轮播头图（16:9）
+        SkeletonBlock(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f),
+        )
+
+        repeat(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SkeletonBlock(modifier = Modifier.width(120.dp).height(16.dp), shape = RoundedCornerShape(4.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    repeat(3) { AnimePosterSkeleton() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 观看历史骨架（封面 + 右侧两行文字）。
+ *
+ * @param rows 占位条数
+ */
+@Composable
+fun HistorySkeleton(rows: Int = 5) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        repeat(rows) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(90.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+            ) {
+                SkeletonBlock(modifier = Modifier.width(160.dp).height(90.dp), shape = RoundedCornerShape(0.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.9f).height(12.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.5f).height(10.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.7f).height(10.dp), shape = RoundedCornerShape(4.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 播放页骨架：播放器黑块 + 标题 + 剧集区。
+ */
+@Composable
+fun PlaySkeleton() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SkeletonBlock(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = RoundedCornerShape(0.dp))
+
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp), shape = RoundedCornerShape(4.dp))
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.9f).height(12.dp), shape = RoundedCornerShape(4.dp))
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp), shape = RoundedCornerShape(4.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(4) {
+                    SkeletonBlock(modifier = Modifier.size(width = 64.dp, height = 36.dp))
+                }
+            }
+        }
+    }
+}

@@ -139,6 +139,7 @@ private const val MaxSeekFractionPerDrag = 0.5f
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun NekoPlayer(
+    player: ExoPlayer,
     episode: Episode,
     url: String,
     modifier: Modifier = Modifier,
@@ -188,12 +189,9 @@ fun NekoPlayer(
     // 进度回调包一层：下面的常驻 effect 只会启动一次，直接捕获参数会一直用第一次组合时的 lambda
     val currentOnProgress by rememberUpdatedState(onProgress)
 
-    // 播放器实例只建一次：切 URL 时换 MediaItem，不重建播放器（否则会卡一下并丢状态）
-    val player = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-        }
-    }
+    // 播放器由外层（播放页的 ViewModel）持有：
+    // - 同一页面里切 URL 只换 MediaItem，不重建播放器；
+    // - 从别的播放页返回时拿到的是同一个实例，缓冲与进度都还在，不会重新加载。
 
     // 切到后台之前是不是在播：决定回到前台要不要自动继续
     // （用户自己按了暂停再切后台，回来就不该自己播起来）
@@ -288,13 +286,28 @@ fun NekoPlayer(
             )
 
             player.removeListener(listener)
-            player.release()
-            android.util.Log.i("NekoPlayer", "ExoPlayer 释放")
+
+            // 只暂停、不释放：这个播放页可能只是被压在另一个播放页下面（返回时要接着播）。
+            // 真正的释放交给 PlaybackViewModel.onCleared（页面被弹出时）。
+            player.pause()
+            android.util.Log.i("NekoPlayer", "离开播放页：暂停（播放器由 ViewModel 持有，不释放）")
         }
     }
 
     // URL 变化：换源（同一个播放器实例）
     LaunchedEffect(url) {
+        // 返回本页（或被压在下面再回来）：媒体源没变就直接接着播——
+        // 不重新 setMediaItem、不 prepare、也不重新 seek，缓冲与进度都保留着
+        val currentUrl = player.currentMediaItem?.localConfiguration?.uri?.toString()
+
+        if (player.mediaItemCount > 0 && currentUrl == url) {
+            loadedEpisodeId.intValue = episode.id
+            player.play()
+            android.util.Log.i("NekoPlayer", "媒体源未变，直接续播（不重新加载）")
+
+            return@LaunchedEffect
+        }
+
         errorText = null
         android.util.Log.i("NekoPlayer", "换源: $url")
 

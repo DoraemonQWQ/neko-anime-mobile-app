@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.CoverImage
 import top.nekoanime.mobile.app.component.rememberSaveableList
+import top.nekoanime.mobile.app.component.HistorySkeleton
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.UserRepository
 import top.nekoanime.mobile.app.model.entity.WatchHistory
@@ -183,12 +184,8 @@ fun HistoryScreen(
             modifier = Modifier.weight(1f),
         ) {
         when {
-            items.isEmpty() && loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            }
+            // 加载中：先摆历史条目骨架
+            items.isEmpty() && loading -> HistorySkeleton()
 
             items.isEmpty() -> Box(
                 // 套一层（空的）滚动容器：没有可滚动子节点时下拉手势根本传不到刷新组件

@@ -20,8 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
 import top.nekoanime.mobile.app.component.rememberSaveableState
+import top.nekoanime.mobile.app.component.PlaySkeleton
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
 
 /**
@@ -53,6 +56,11 @@ fun PlayRouteScreen(
 ) {
     // 详情与加载状态保存：从推荐页返回时直接用已有详情，不再请求一次
     val animeState = rememberSaveableState<AnimeDetail>("play_detail_$animeId")
+    // 播放会话（含 ExoPlayer）：跟着这个播放页的返回栈条目存活，
+    // 所以「A → 推荐 → B → 返回 A」时 A 的播放器还是原来那个，直接续播不重新加载
+    val playback: PlaybackViewModel = viewModel()
+    val context = LocalContext.current
+    val player = remember(playback) { playback.player(context) }
     var error by rememberSaveable(animeId) { mutableStateOf<String?>(null) }
     var loading by rememberSaveable(animeId) { mutableStateOf(true) }
     val anime = animeState.value
@@ -88,6 +96,7 @@ fun PlayRouteScreen(
     if (detail != null) {
         PlayScreen(
             anime = detail,
+            player = player,
             fullscreen = fullscreen,
             onToggleFullscreen = onToggleFullscreen,
             onBack = onBack,
@@ -116,7 +125,8 @@ fun PlayRouteScreen(
                 modifier = Modifier.padding(24.dp),
             )
 
-            loading -> CircularProgressIndicator(color = Color(0xFFE91E63))
+            // 加载中：摆出「播放器 + 标题 + 剧集」骨架，比单个转圈更接近最终页面
+            loading -> PlaySkeleton()
             else -> Unit
         }
     }
