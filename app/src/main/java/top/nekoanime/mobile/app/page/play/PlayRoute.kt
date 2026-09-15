@@ -109,25 +109,26 @@ fun PlayRouteScreen(
         return
     }
 
-    // 详情还没好（或失败）：给一个黑底占位，别让用户看白屏
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center,
-    ) {
-        when {
-            error != null -> Text(
+    // 详情还没好（或失败）：别让用户看白屏
+    when {
+        // 加载失败：给一块黑底 + 说明（播放页上方本来就是黑底）
+        error != null -> Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
                 text = "番剧信息加载失败\n$error\n（按返回键回上一页）",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(24.dp),
             )
-
-            // 加载中：摆出「播放器 + 标题 + 剧集」骨架，比单个转圈更接近最终页面
-            loading -> PlaySkeleton()
-            else -> Unit
         }
+
+        // 加载中：按播放页真实结构摆骨架（上方固定黑底播放器 + 下方主题色内容区）
+        loading -> PlaySkeleton()
+        else -> Unit
     }
 }

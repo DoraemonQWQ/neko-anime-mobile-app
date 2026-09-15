@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -191,28 +193,78 @@ fun HistorySkeleton(rows: Int = 5) {
 }
 
 /**
- * 播放页骨架：播放器黑块 + 标题 + 剧集区。
+ * 播放页骨架。
+ *
+ * @description 按播放页的真实结构摆占位，而不是随便几块灰条：
+ * 1. 上半部分是**固定黑色**的区域（状态栏留白 + 16:9 播放器，跟 NekoPlayer 一样）；
+ * 2. 播放器以下跟软件主题色走：固定的「选集」区（标题 + 选集条），
+ *    再往下是可滚动区的番剧信息卡片（竖版封面 + 右侧信息）与推荐行。
  */
 @Composable
 fun PlaySkeleton() {
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        SkeletonBlock(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = RoundedCornerShape(0.dp))
-
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        // 播放器黑底：状态栏那一条也在黑底里（跟真实播放页一致）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.Black),
         ) {
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp), shape = RoundedCornerShape(4.dp))
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.9f).height(12.dp), shape = RoundedCornerShape(4.dp))
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp), shape = RoundedCornerShape(4.dp))
+            SkeletonBlock(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .aspectRatio(16f / 9f),
+                shape = RoundedCornerShape(0.dp),
+            )
+        }
+
+        // 固定区：选集（标题一行 + 选集条一行）
+        Column(
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SkeletonBlock(modifier = Modifier.width(140.dp).height(18.dp), shape = RoundedCornerShape(4.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                repeat(4) {
-                    SkeletonBlock(modifier = Modifier.size(width = 64.dp, height = 36.dp))
+                repeat(5) {
+                    SkeletonBlock(
+                        modifier = Modifier.size(width = 56.dp, height = 34.dp),
+                        shape = RoundedCornerShape(6.dp),
+                    )
                 }
+            }
+        }
+
+        // 可滚动区：番剧信息卡片 + 推荐
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SkeletonBlock(
+                    modifier = Modifier.size(width = 96.dp, height = 136.dp),
+                    shape = RoundedCornerShape(6.dp),
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.7f).height(16.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.9f).height(12.dp), shape = RoundedCornerShape(4.dp))
+                    SkeletonBlock(modifier = Modifier.width(88.dp).height(32.dp), shape = RoundedCornerShape(6.dp))
+                }
+            }
+
+            SkeletonBlock(modifier = Modifier.width(120.dp).height(18.dp), shape = RoundedCornerShape(4.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(3) { AnimePosterSkeleton() }
             }
         }
     }

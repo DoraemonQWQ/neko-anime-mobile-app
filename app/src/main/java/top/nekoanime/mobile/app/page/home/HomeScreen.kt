@@ -262,6 +262,9 @@ private fun HomeTabContent(
     var failed by rememberSaveable { mutableStateOf(false) }
     var reloadKey by rememberSaveable { mutableIntStateOf(0) }
     var loadedOnce by rememberSaveable { mutableStateOf(false) }
+    // 下拉刷新的转圈只在这里为 true：不能用 loading 推导，
+    // 否则首次加载时「数据一部分已经到了」会让刷新指示器突然冒出来（看起来像自己下拉了一下）
+    var refreshing by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
         // 已经有数据（从二级页返回）且不是手动刷新：直接用缓存，不再打接口
@@ -298,12 +301,16 @@ private fun HomeTabContent(
         failed = hotResult.isFailure && rows.isEmpty()
         loading = false
         loadedOnce = true
+        refreshing = false
     }
 
     // 下拉刷新：重新拉轮播 / 推荐 / 继续观看（已有内容时才显示刷新指示器，首次加载走中间的转圈）
     PullToRefreshBox(
-        isRefreshing = loading && (hot.isNotEmpty() || rows.isNotEmpty()),
-        onRefresh = { reloadKey++ },
+        isRefreshing = refreshing,
+        onRefresh = {
+            refreshing = true
+            reloadKey += 1
+        },
         modifier = Modifier.fillMaxSize(),
     ) {
         Column(
