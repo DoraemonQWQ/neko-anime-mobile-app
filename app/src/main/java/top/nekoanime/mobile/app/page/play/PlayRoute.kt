@@ -61,7 +61,8 @@ fun PlayRouteScreen(
     val playback: PlaybackViewModel = viewModel()
     val context = LocalContext.current
     val player = remember(playback) { playback.player(context) }
-    var error by rememberSaveable(animeId) { mutableStateOf<String?>(null) }
+    // 只记"详情加载失败了"这一个布尔值：原始报错（接口、后端说明）只写 logcat，不上界面
+    var failed by rememberSaveable(animeId) { mutableStateOf(false) }
     var loading by rememberSaveable(animeId) { mutableStateOf(true) }
     val anime = animeState.value
 
@@ -82,11 +83,15 @@ fun PlayRouteScreen(
         }
 
         loading = true
-        error = null
+        failed = false
 
         AnimeRepository.detail(animeId)
             .onSuccess { animeState.value = it }
-            .onFailure { error = it.message ?: "加载失败" }
+            .onFailure { failure ->
+                // 详情加载失败的具体原因只进日志，用户只需要知道"失败了、可以退回"
+                android.util.Log.e("PlayRoute", "番剧详情加载失败: animeId=$animeId", failure)
+                failed = true
+            }
 
         loading = false
     }
@@ -112,14 +117,14 @@ fun PlayRouteScreen(
     // 详情还没好（或失败）：别让用户看白屏
     when {
         // 加载失败：给一块黑底 + 说明（播放页上方本来就是黑底）
-        error != null -> Box(
+        failed -> Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "番剧信息加载失败\n$error\n（按返回键回上一页）",
+                text = "番剧信息加载失败\n（按返回键回上一页）",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,

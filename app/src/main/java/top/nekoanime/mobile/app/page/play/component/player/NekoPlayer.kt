@@ -15,7 +15,9 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -228,7 +232,9 @@ fun NekoPlayer(
     var durationMs by remember { mutableLongStateOf(0L) }
     var bufferedMs by remember { mutableLongStateOf(0L) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
-    var errorText by remember { mutableStateOf<String?>(null) }
+    // 只记"出错了没有"这一个布尔值：具体错误码、错误信息、堆栈一律只写 logcat（见 onPlayerError），
+    // 界面上只给用户一句"播放失败"+ 重试按钮，不把播放器的原始报错糊到用户脸上
+    var hasError by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var locked by remember { mutableStateOf(false) }
@@ -270,7 +276,8 @@ fun NekoPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                errorText = error.errorCodeName
+                // 报错细节只进日志：现场排查靠这行（错误码 + 底层信息 + 堆栈全在）
+                hasError = true
                 android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName} / ${error.message}", error)
             }
         }
@@ -308,7 +315,7 @@ fun NekoPlayer(
             return@LaunchedEffect
         }
 
-        errorText = null
+        hasError = false
         android.util.Log.i("NekoPlayer", "换源: $url")
 
         // 换源前把上一集的进度补报一次（此时 episode 已经是新值，所以要报 loadedEpisodeId）
@@ -357,6 +364,31 @@ fun NekoPlayer(
     /** 一次操作结束：自动隐藏从这里开始重新计时 */
     fun endInteraction() {
         interactingCount = (interactingCount - 1).coerceAtLeast(0)
+    }
+
+    /**
+     * 重试播放。
+     *
+     * @description 出错后 ExoPlayer 会停在 idle 状态，不会自己再往下走，必须重新 prepare 才会再次发起请求。
+     * 重试前先记下当前进度，重新加载后跳回去，用户不会因为一次网络抖动就从这一集的开头重看。
+     *
+     * 失败原因（错误码、底层 message、堆栈）只写 logcat，不往界面上传递。
+     */
+    fun retryPlayback() {
+        val resumeMs = player.currentPosition.coerceAtLeast(0L)
+
+        android.util.Log.i("NekoPlayer", "重试播放: $url @ ${resumeMs}ms")
+
+        hasError = false
+        player.setMediaItem(MediaItem.fromUri(url))
+        player.prepare()
+
+        if (resumeMs > 0L) {
+            player.seekTo(resumeMs)
+            positionMs = resumeMs
+        }
+
+        player.playWhenReady = true
     }
 
     // 控制栏显示后 5 秒没操作就自动隐藏：
@@ -536,7 +568,7 @@ fun NekoPlayer(
                 .playerGestures(
                     // 抽屉展开时关掉播放器手势：抽屉是模态浮层，
                     // 这时在阴影/抽屉上滑动不该再改播放进度或亮度音量
-                    enabled = errorText == null && !drawerOpen,
+                    enabled = !hasError && !drawerOpen,
                     locked = locked,
                     // 锁定后单击依然可以显隐控制栏（解锁键跟着一起动），其它手势在 PlayerGestures 里被忽略
                     onTap = { controlsVisible = !controlsVisible },
@@ -649,16 +681,37 @@ fun NekoPlayer(
             )
         }
 
-        // 出错提示（点一下重试）
-        errorText?.let { message ->
-            Text(
-                text = "播放出错：$message\n（点画面重试）",
-                color = Color.White,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-            )
+        // 播放失败：只给一句笼统提示 + 一个重试按钮。
+        // 原始错误（错误码/底层 message/堆栈）只写 logcat，见 onPlayerError，界面上一个字都不露。
+        // 整块是一个居中的 Column，不含任何单边 padding，所以按钮与文字严格落在画面中心。
+        if (hasError) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                IconButton(
+                    onClick = { retryPlayback() },
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.32f)),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "重试",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+
+                Text(
+                    text = "播放失败",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
         // 中央 HUD
@@ -666,7 +719,7 @@ fun NekoPlayer(
 
         // 暂停时画面中央的大播放按钮（B 站 也是这样：暂停后中间有个明显的 ▶，点一下继续）。
         // 控制栏里已经没有播放/暂停按钮了，这个就是"恢复播放"最直观的入口。
-        if (!playing && !buffering && errorText == null && !locked) {
+        if (!playing && !buffering && !hasError && !locked) {
             IconButton(
                 onClick = { player.play() },
                 modifier = Modifier

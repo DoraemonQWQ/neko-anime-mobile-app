@@ -126,7 +126,8 @@ fun PlayScreen(
     // 这个地址是哪一集的：只有集数变了才重新问后端，返回本页时不用再要一次
     var videoUrlEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(-1) }
     var videoLoading by rememberSaveable(anime.id) { mutableStateOf(false) }
-    var videoError by rememberSaveable(anime.id) { mutableStateOf<String?>(null) }
+    // 只记"拿地址失败"这个布尔值：后端返回的原始报错只写 logcat，不给用户看
+    var videoFailed by rememberSaveable(anime.id) { mutableStateOf(false) }
     val videoUrl = videoState.value
 
     LaunchedEffect(anime.id, currentEpisodeId) {
@@ -139,14 +140,18 @@ fun PlayScreen(
         }
 
         videoLoading = true
-        videoError = null
+        videoFailed = false
 
         AnimeRepository.episodePlay(episode.id, episode)
             .onSuccess {
                 videoState.value = it.videoUrl
                 videoUrlEpisodeId = episode.id
             }
-            .onFailure { videoError = it.message ?: "拿不到播放地址" }
+            .onFailure { failure ->
+                // 原始报错（接口地址、后端说明）只进日志，界面上只提示"暂时播不了"
+                android.util.Log.e("PlayScreen", "拿播放地址失败: episode=${episode.id}", failure)
+                videoFailed = true
+            }
 
         videoLoading = false
     }
@@ -214,7 +219,7 @@ fun PlayScreen(
                 // 还没拿到播放地址（或者在切集途中失败了）：占位，保持和播放器一样的尺寸，页面不跳
                 PlayerPlaceholder(
                     loading = videoLoading,
-                    error = videoError,
+                    failed = videoFailed,
                     modifier = playerModifier(fullscreen),
                 )
             }
@@ -279,19 +284,19 @@ private fun playerModifier(fullscreen: Boolean): Modifier = if (fullscreen) {
  * 播放地址还没拿到时的占位。
  *
  * @param loading 是否正在加载
- * @param error 错误信息（null 表示还没出错）
+ * @param failed 是不是失败了（具体报错只写日志，见拿播放地址那段）
  * @param modifier 尺寸约束（跟播放器一致）
  */
 @Composable
 private fun PlayerPlaceholder(
     loading: Boolean,
-    error: String?,
+    failed: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when {
-            error != null -> Text(
-                text = "这一集暂时播不了\n$error",
+            failed -> Text(
+                text = "这一集暂时播不了，请稍后重试",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
