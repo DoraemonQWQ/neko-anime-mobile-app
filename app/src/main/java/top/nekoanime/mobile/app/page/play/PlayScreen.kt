@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +43,8 @@ import top.nekoanime.mobile.app.page.play.component.AnimeInfoCard
 import top.nekoanime.mobile.app.page.play.component.EpisodeSection
 import top.nekoanime.mobile.app.page.play.component.RecommendSection
 import top.nekoanime.mobile.app.page.play.component.player.NekoPlayer
+import top.nekoanime.mobile.app.component.rememberSaveableList
+import top.nekoanime.mobile.app.component.rememberSaveableState
 import top.nekoanime.mobile.app.service.resolvePlaybackStart
 
 /** 播放页底部推荐几个 */
@@ -110,36 +113,58 @@ fun PlayScreen(
         resolvePlaybackStart(anime, startEpisodeId, startPositionMs, progressStore)
     }
 
-    var currentEpisodeId by remember { mutableIntStateOf(start.episodeId) }
-    var resumePositionMs by remember { mutableLongStateOf(start.positionMs) }
+    // 这几个状态都保存下来：从别的播放页返回时不会「先空一下再重新请求」——
+    // 上一次播的那一集、播放地址、推荐列表都还在，直接接着用（播放器实例也还在，见 PlaybackViewModel）
+    var currentEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(start.episodeId) }
+    var resumePositionMs by rememberSaveable(anime.id) { mutableLongStateOf(start.positionMs) }
 
     val currentEpisode = anime.episodes.firstOrNull { it.id == currentEpisodeId }
         ?: anime.episodes.firstOrNull()
 
     // 播放地址：切集重新问后端。注意拿到新地址前保留旧地址，避免播放器被销毁重建。
-    var videoUrl by remember { mutableStateOf<String?>(null) }
-    var videoLoading by remember { mutableStateOf(false) }
-    var videoError by remember { mutableStateOf<String?>(null) }
+    val videoState = rememberSaveableState<String>("play_url_${anime.id}")
+    // 这个地址是哪一集的：只有集数变了才重新问后端，返回本页时不用再要一次
+    var videoUrlEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(-1) }
+    var videoLoading by rememberSaveable(anime.id) { mutableStateOf(false) }
+    var videoError by rememberSaveable(anime.id) { mutableStateOf<String?>(null) }
+    val videoUrl = videoState.value
 
     LaunchedEffect(anime.id, currentEpisodeId) {
         val episode = currentEpisode ?: return@LaunchedEffect
+
+        // 同一集的地址已经有了（返回本页 / 重组）：直接用，不重新请求
+        if (videoUrlEpisodeId == episode.id && !videoUrl.isNullOrBlank()) {
+            videoLoading = false
+            return@LaunchedEffect
+        }
 
         videoLoading = true
         videoError = null
 
         AnimeRepository.episodePlay(episode.id, episode)
-            .onSuccess { videoUrl = it.videoUrl }
+            .onSuccess {
+                videoState.value = it.videoUrl
+                videoUrlEpisodeId = episode.id
+            }
             .onFailure { videoError = it.message ?: "拿不到播放地址" }
 
         videoLoading = false
     }
 
     // 推荐：后端按这个番剧的题材随机挑 10 个、自动排除自己
-    var recommendations by remember(anime.id) { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+    val recommendations = rememberSaveableList<AnimeBrief>("play_recommend_${anime.id}")
 
     LaunchedEffect(anime.id) {
+        // 已经有了（返回本页）：不重新推荐
+        if (recommendations.isNotEmpty()) {
+            return@LaunchedEffect
+        }
+
         AnimeRepository.recommendForAnime(anime.id, RecommendCount)
-            .onSuccess { recommendations = it }
+            .onSuccess { list ->
+                recommendations.clear()
+                recommendations.addAll(list)
+            }
     }
 
     /** 切集：跳到这一集自己的本地进度，并把"这个番看到第几集"一起更新 */

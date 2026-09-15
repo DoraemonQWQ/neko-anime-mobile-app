@@ -7,6 +7,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -388,7 +390,11 @@ fun PlaySkeleton() {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, top = 10.dp),
+                        // 横向可滚 + 只留左边内边距：卡片保持 120dp 原宽，
+                        // 最后一张被视口裁掉一部分（跟真实 LazyRow 的观感一致），
+                        // 不然 Row 会把放不下的卡片压窄，看着就不是那个卡片了
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 12.dp, top = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     repeat(3) { AnimePosterSkeleton() }
