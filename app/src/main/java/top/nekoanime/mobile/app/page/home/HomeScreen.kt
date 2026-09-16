@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.nekoanime.mobile.app.R
 import top.nekoanime.mobile.app.component.AnimePosterCard
+import top.nekoanime.mobile.app.component.appendDistinct
 import top.nekoanime.mobile.app.component.FilterSelector
 import top.nekoanime.mobile.app.component.LoginDialog
 import top.nekoanime.mobile.app.component.AnimeGridSkeleton
@@ -401,7 +402,9 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
             category = category,
         )
             .onSuccess { paged ->
-                items.addAll(paged.items)
+                // 去重追加：服务端按评分排序存在并列，翻页边界可能重复返回同一条；
+                // 而 LazyGrid 的 key 必须唯一，重复 key 会直接抛异常闪退
+                items.appendDistinct(paged.items) { it.id }
                 page = nextPage
                 hasMore = paged.hasMore
                 error = null

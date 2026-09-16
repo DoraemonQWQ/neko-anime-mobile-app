@@ -50,6 +50,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.AnimePosterCard
+import top.nekoanime.mobile.app.component.appendDistinct
 import top.nekoanime.mobile.app.component.NekoSearchBar
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.component.AnimeGridSkeleton
@@ -111,7 +112,8 @@ fun SearchScreen(
 
         AnimeRepository.search(submittedKeyword, page = nextPage, limit = pageSize)
             .onSuccess { paged ->
-                results.addAll(paged.items)
+                // 同"全部动漫"页：搜索结果也是按评分分页，边界可能重复，去重后再入列
+                results.appendDistinct(paged.items) { it.id }
                 page = nextPage
                 hasMore = paged.hasMore
                 error = null

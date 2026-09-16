@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.CoverImage
+import top.nekoanime.mobile.app.component.appendDistinct
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.component.HistorySkeleton
 import top.nekoanime.mobile.app.config.ConfigLoader
@@ -113,7 +114,9 @@ fun HistoryScreen(
 
         UserRepository.history(page = nextPage, limit = HistoryPageSize)
             .onSuccess { list ->
-                items.addAll(list)
+                // 去重追加：历史按"最后观看时间"排序，同一秒的多条记录顺序不稳定，
+                // 翻页边界可能重复；列表 key 重复会让 LazyColumn 抛异常
+                items.appendDistinct(list) { "${it.animeId}-${it.episodeId}" }
                 page = nextPage
                 hasMore = list.size >= HistoryPageSize
                 error = null
