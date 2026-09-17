@@ -385,8 +385,13 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.initialIsSearch():
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.initialIsSplash(): Boolean =
     initialState.destination.hasRoute(SplashRoute::class)
 
-/** 搜索页转场时长：进、出用同一套参数，避免"进去一个样、出来另一个样" */
-private const val SearchTransitionMillis = 220
+/**
+ * 转场时长（毫秒）。
+ *
+ * @description 全站统一一个数值：进、出、返回、被覆盖都用它，位移与淡入淡出也用同一个时长——
+ * 之前退出那条淡出写的 200ms、滑出 260ms（淡出先结束），看起来就是"进慢出快"。
+ */
+private const val SearchTransitionMillis = 260
 
 /**
  * 搜索页出现时的动画（前进进入、返回回来都用它）。
@@ -413,7 +418,7 @@ private fun searchExitTransition(): ExitTransition =
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.enterAnimation(): EnterTransition = when {
     // 启动页 → 首页：纯淡入淡出（两边时长一致才是干净的交叠淡出，没有位移）
-    initialIsSplash() -> fadeIn(tween(300))
+    initialIsSplash() -> fadeIn(tween(260))
     // 搜索页：进、出统一用 searchEnterTransition / searchExitTransition
     targetIsSearch() -> searchEnterTransition()
     initialIsSearch() -> searchEnterTransition()
@@ -428,12 +433,12 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.enterAnimation(): 
  * @returns 退出动画
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.exitAnimation(): ExitTransition = when {
-    initialIsSplash() -> fadeOut(tween(300))
+    initialIsSplash() -> fadeOut(tween(260))
     targetIsSearch() -> searchExitTransition()
     initialIsSearch() -> searchExitTransition()
     // 目标变回首页时，当前页按「被返回」的方向滑出
-    targetIsHome() -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(200))
-    else -> slideOutHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeOut(tween(200))
+    targetIsHome() -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(260))
+    else -> slideOutHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeOut(tween(260))
 }
 
 /**
@@ -459,5 +464,5 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnterAnimation(
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExitAnimation(): ExitTransition = when {
     initialIsSearch() -> searchExitTransition()
-    else -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(200))
+    else -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(260))
 }
