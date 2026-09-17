@@ -2,6 +2,7 @@ package top.nekoanime.mobile.app.component
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -61,6 +62,7 @@ fun BangumiLoginDialog(
 ) {
     var error by remember { mutableStateOf<String?>(null) }
     var exchanging by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
 
     // 未绑定的 Bangumi 账号：不把人堵死，就地补一个登录名+密码完成注册（昵称头像用 Bangumi 的）
     var registerTempId by remember { mutableStateOf<String?>(null) }
@@ -127,7 +129,11 @@ fun BangumiLoginDialog(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = if (exchanging) "正在登录…" else "在下面完成 Bangumi 授权即可",
+                    text = when {
+                        exchanging -> "正在登录…"
+                        loading -> "正在打开 Bangumi 授权页…"
+                        else -> "在下面完成 Bangumi 授权即可"
+                    },
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -182,6 +188,34 @@ fun BangumiLoginDialog(
                         WebView(context).apply {
                             settings.javaScriptEnabled = true
                             webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    loading = true
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    loading = false
+                                }
+
+                                /**
+                                 * 主文档加载失败时明确提示。
+                                 *
+                                 * @description 最常见的原因就是"手机网络到不了 bangumi.tv"
+                                 * （国内常见），以前会呈现为一片黑/白屏，用户完全不知道发生了什么。
+                                 */
+                                override fun onReceivedError(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                    webError: WebResourceError,
+                                ) {
+                                    if (!request.isForMainFrame) {
+                                        return
+                                    }
+
+                                    loading = false
+                                    error = "打不开 Bangumi 授权页：${webError.description}。" +
+                                        "请检查手机网络（必要时挂代理），或改用账号密码登录。"
+                                }
+
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView,
                                     request: WebResourceRequest,
@@ -195,6 +229,7 @@ fun BangumiLoginDialog(
 
                                     // 拦下跳转：不再真的加载网页，直接拿 temp_id 换 token
                                     exchanging = true
+                                    loading = false
                                     error = null
 
                                     scope.launch {
