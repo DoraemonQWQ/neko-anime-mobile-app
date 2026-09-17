@@ -5,6 +5,12 @@ import top.nekoanime.mobile.app.model.dto.AvatarUploadUrlBody
 import top.nekoanime.mobile.app.model.dto.AvatarUploadUrlDto
 import top.nekoanime.mobile.app.model.dto.UserInfoDto
 import top.nekoanime.mobile.app.model.dto.UpdateNicknameBody
+import top.nekoanime.mobile.app.model.dto.BangumiBindingDto
+import kotlinx.serialization.Serializable
+
+/** 空请求体（解绑接口不需要参数，但客户端方法要一个序列化器） */
+@Serializable
+private object UnbindBody
 
 /**
  * 用户身份接口（需要登录）。
@@ -65,5 +71,41 @@ object UserIdentityApi {
         body = UpdateNicknameBody(nickname = nickname),
         bodySerializer = UpdateNicknameBody.serializer(),
         serializer = UserInfoDto.serializer(),
+    )
+
+    /**
+     * 取 Bangumi 绑定状态。
+     *
+     * @returns 是否已绑定 + Bangumi 昵称头像
+     */
+    suspend fun bangumiBinding(): Result<BangumiBindingDto> = ApiClient.get(
+        path = ApiRoutes.USER_BANGUMI_BINDING,
+        serializer = BangumiBindingDto.serializer(),
+    )
+
+    /**
+     * 取"发起绑定"用的 Bangumi 授权地址。
+     *
+     * @description 后端那个接口是 GET + 302（同时需要登录态），浏览器直接导航带不上 Authorization，
+     * 所以这里由 App 带着 token 请求一次，只取回 Location（Bangumi 授权页地址），再交给 WebView 打开。
+     *
+     * @param redirectUrl 授权完成后的回跳地址
+     * @returns Bangumi 授权页地址
+     */
+    suspend fun bangumiBindUrl(redirectUrl: String = "https://www.nekoanime.top/user"): Result<String> =
+        ApiClient.getRedirectLocation(
+            path = ApiRoutes.USER_BANGUMI_BIND,
+            query = mapOf("redirect_url" to redirectUrl),
+        )
+
+    /**
+     * 解绑 Bangumi。
+     *
+     * @returns 成功/失败
+     */
+    suspend fun unbindBangumi(): Result<Unit> = ApiClient.postUnit(
+        path = ApiRoutes.USER_BANGUMI_UNBIND,
+        body = UnbindBody,
+        bodySerializer = UnbindBody.serializer(),
     )
 }

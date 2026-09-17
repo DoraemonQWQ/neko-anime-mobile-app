@@ -36,7 +36,14 @@ object ApiClient {
         explicitNulls = false
     }
 
-    private val http = OkHttpClient.Builder()
+private val http = OkHttpClient.Builder()
+    .connectTimeout(ConfigLoader.config.api.connectTimeoutSeconds, TimeUnit.SECONDS)
+    .readTimeout(ConfigLoader.config.api.readTimeoutSeconds, TimeUnit.SECONDS)
+    .build()
+
+    /** 不跟随重定向的客户端：Bangumi 绑定要先拿到后端 302 的目标（授权页地址），而不是被它带走 */
+    private val noRedirectHttp = OkHttpClient.Builder()
+        .followRedirects(false)
         .connectTimeout(ConfigLoader.config.api.connectTimeoutSeconds, TimeUnit.SECONDS)
         .readTimeout(ConfigLoader.config.api.readTimeoutSeconds, TimeUnit.SECONDS)
         .build()
@@ -189,6 +196,42 @@ object ApiClient {
      * @param serializer 响应体的反序列化器
      * @returns 成功是解析后的对象，失败是带可读信息的异常
      */
+    /**
+     * 发一个**不跟随重定向**的 GET，返回 302 的 Location 头。
+     *
+     * @description 用于"后端 302 去第三方授权页"的场景（比如 Bangumi 绑定）：
+     * 我们只要那个目标地址，拿到后交给 WebView 打开，而不是让 OkHttp 自己跟过去。
+     *
+     * @param path 路径（相对配置里的 baseUrl）
+     * @param query 查询参数
+     * @returns Location 头的值（第三方授权页地址）
+     */
+    suspend fun getRedirectLocation(
+        path: String,
+        query: Map<String, String> = emptyMap(),
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = (ConfigLoader.config.api.baseUrl + path).toHttpUrlOrNull()
+                ?: throw addressError("接口地址不合法：$path")
+            val urlWithQuery = url.newBuilder().apply {
+                query.forEach { (key, value) -> addQueryParameter(key, value) }
+            }.build()
+
+            val request = Request.Builder()
+                .url(urlWithQuery)
+                .apply { authToken?.let { header("Authorization", "Bearer $it") } }
+                .build()
+
+            noRedirectHttp.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error(failureMessage(path, response.code, response.body?.string().orEmpty()))
+                }
+
+                response.header("Location") ?: error("后端没有返回跳转地址")
+            }
+        }
+    }
+
     suspend fun <B, T> post(
         path: String,
         body: B,

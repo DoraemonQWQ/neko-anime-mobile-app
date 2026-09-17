@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import top.nekoanime.mobile.app.component.CoverImage
 import top.nekoanime.mobile.app.component.EntryRow
+import top.nekoanime.mobile.app.component.BangumiBindingRow
 
 /** 头像容器高度（跟 Flutter 版的 avatarBox 一个量级） */
 private val AvatarBoxHeight = 240.dp
@@ -113,6 +114,9 @@ fun UserTab(
                 enabled = loggedIn,
                 onClick = onOpenHistory,
             )
+
+            // Bangumi 绑定：放在历史记录下面；自己管绑定状态，未登录时置灰
+            BangumiBindingRow(loggedIn = loggedIn)
 
             EntryRow(
                 icon = Icons.Filled.Settings,

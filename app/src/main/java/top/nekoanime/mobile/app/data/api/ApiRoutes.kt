@@ -76,6 +76,15 @@ object ApiRoutes {
     /** 头像直传：提交写库 */
     const val USER_AVATAR_COMMIT = "/api/user/data/avatar/commit"
 
+    /** Bangumi 绑定状态（需要登录） */
+    const val USER_BANGUMI_BINDING = "/api/user/data/bangumi/binding"
+
+    /** 发起 Bangumi 绑定：后端会 302 到 Bangumi 授权页（需要登录，带 redirect_url） */
+    const val USER_BANGUMI_BIND = "/api/user/data/bangumi/bind"
+
+    /** 解绑 Bangumi（需要登录） */
+    const val USER_BANGUMI_UNBIND = "/api/user/data/bangumi/unbind"
+
     // ==================== 客户端更新（公开） ====================
 
     /** 检查更新 */
