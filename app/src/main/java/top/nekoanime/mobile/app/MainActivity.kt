@@ -385,6 +385,27 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.initialIsSearch():
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.initialIsSplash(): Boolean =
     initialState.destination.hasRoute(SplashRoute::class)
 
+/** 搜索页转场时长：进、出用同一套参数，避免"进去一个样、出来另一个样" */
+private const val SearchTransitionMillis = 220
+
+/**
+ * 搜索页出现时的动画（前进进入、返回回来都用它）。
+ *
+ * @returns 从 0.94 放大到 1 + 淡入
+ */
+private fun searchEnterTransition(): EnterTransition =
+    scaleIn(initialScale = 0.94f, animationSpec = tween(SearchTransitionMillis)) +
+        fadeIn(tween(SearchTransitionMillis))
+
+/**
+ * 搜索页消失时的动画（被覆盖、被返回都用它）。
+ *
+ * @returns 从 1 缩小到 0.94 + 淡出
+ */
+private fun searchExitTransition(): ExitTransition =
+    scaleOut(targetScale = 0.94f, animationSpec = tween(SearchTransitionMillis)) +
+        fadeOut(tween(SearchTransitionMillis))
+
 /**
  * 前进时的「进入」动画。
  *
@@ -393,9 +414,9 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.initialIsSplash():
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.enterAnimation(): EnterTransition = when {
     // 启动页 → 首页：纯淡入淡出（两边时长一致才是干净的交叠淡出，没有位移）
     initialIsSplash() -> fadeIn(tween(300))
-    // 搜索页：像「弹出来」一样缩放
-    targetIsSearch() -> scaleIn(initialScale = 0.92f, animationSpec = tween(220)) + fadeIn(tween(220))
-    initialIsSearch() -> scaleIn(initialScale = 1.04f, animationSpec = tween(200)) + fadeIn(tween(200))
+    // 搜索页：进、出统一用 searchEnterTransition / searchExitTransition
+    targetIsSearch() -> searchEnterTransition()
+    initialIsSearch() -> searchEnterTransition()
     // 回到首页：按返回动画（从左侧滑入），不要用前进动画
     targetIsHome() -> slideInHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeIn(tween(260))
     else -> slideInHorizontally(animationSpec = tween(260)) { it } + fadeIn(tween(260))
@@ -408,8 +429,8 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.enterAnimation(): 
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.exitAnimation(): ExitTransition = when {
     initialIsSplash() -> fadeOut(tween(300))
-    targetIsSearch() -> scaleOut(targetScale = 1.04f, animationSpec = tween(180)) + fadeOut(tween(160))
-    initialIsSearch() -> scaleOut(targetScale = 0.92f, animationSpec = tween(220)) + fadeOut(tween(180))
+    targetIsSearch() -> searchExitTransition()
+    initialIsSearch() -> searchExitTransition()
     // 目标变回首页时，当前页按「被返回」的方向滑出
     targetIsHome() -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(200))
     else -> slideOutHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeOut(tween(200))
@@ -421,7 +442,7 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.exitAnimation(): E
  * @returns 进入动画
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnterAnimation(): EnterTransition = when {
-    targetIsSearch() -> scaleIn(initialScale = 1.04f, animationSpec = tween(200)) + fadeIn(tween(200))
+    targetIsSearch() -> searchEnterTransition()
     else -> slideInHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeIn(tween(260))
 }
 
@@ -431,6 +452,6 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnterAnimation(
  * @returns 退出动画
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExitAnimation(): ExitTransition = when {
-    initialIsSearch() -> scaleOut(targetScale = 0.92f, animationSpec = tween(220)) + fadeOut(tween(180))
+    initialIsSearch() -> searchExitTransition()
     else -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(200))
 }
