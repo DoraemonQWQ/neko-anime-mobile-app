@@ -423,7 +423,7 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.enterAnimation(): 
     targetIsSearch() -> searchEnterTransition()
     initialIsSearch() -> searchEnterTransition()
     // 回到首页：按返回动画（从左侧滑入），不要用前进动画
-    targetIsHome() -> slideInHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeIn(tween(260))
+    targetIsHome() -> slideInHorizontally(animationSpec = tween(260)) { -it } + fadeIn(tween(260))
     else -> slideInHorizontally(animationSpec = tween(260)) { it } + fadeIn(tween(260))
 }
 
@@ -438,7 +438,7 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.exitAnimation(): E
     initialIsSearch() -> searchExitTransition()
     // 目标变回首页时，当前页按「被返回」的方向滑出
     targetIsHome() -> slideOutHorizontally(animationSpec = tween(260)) { it } + fadeOut(tween(260))
-    else -> slideOutHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeOut(tween(260))
+    else -> slideOutHorizontally(animationSpec = tween(260)) { -it } + fadeOut(tween(260))
 }
 
 /**
@@ -454,7 +454,7 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnterAnimation(
      */
     initialIsSearch() -> searchEnterTransition()
     targetIsSearch() -> searchEnterTransition()
-    else -> slideInHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeIn(tween(260))
+    else -> slideInHorizontally(animationSpec = tween(260)) { -it } + fadeIn(tween(260))
 }
 
 /**
