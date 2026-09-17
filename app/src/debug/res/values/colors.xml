@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    dev 版覆盖自适应图标的背景色（Android 8.0+ 生效）：
+    正式版是品牌粉，dev 版换成橙色，配合 dev/ic_launcher.png 上的 DEV 角标一眼区分。
+    图标前景（白色站点 Logo）与正式版共用同一份资源。
+-->
+<resources>
+    <color name="ic_launcher_background">#FF8A00</color>
+</resources>

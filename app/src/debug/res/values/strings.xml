@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    dev 版覆盖：桌面上显示成 "Neko Anime Dev"，跟正式版一眼区分开。
+    正式版仍用 app/src/main/res/values/strings.xml 里的 "Neko Anime"。
+-->
+<resources>
+    <string name="app_name">Neko Anime Dev</string>
+</resources>

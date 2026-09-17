@@ -26,8 +26,8 @@ android {
         applicationId = "top.nekoanime.mobile.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")
@@ -45,6 +45,17 @@ android {
     }
 
     buildTypes {
+        debug {
+            /*
+             * dev 版与正式版共存的三件事：
+             * 1. applicationId 加 .dev 后缀 → 系统视为两个应用，可以同时安装；
+             * 2. 签名用默认的 debug keystore（**不碰 keystore.properties 里的正式签名**）；
+             * 3. 名称与图标在 app/src/debug/res 里覆盖（Neko Anime Dev + 带 DEV 角标的图标）。
+             */
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
+
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
