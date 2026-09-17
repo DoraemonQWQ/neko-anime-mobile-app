@@ -55,6 +55,9 @@ object ApiRoutes {
     /** Bangumi 一键登录：用 temp_id 换 JWT（POST，带 temp_id 查询参数） */
     const val BANGUMI_LOGIN_STATUS = "/api/auth/oauth/login/bangumi/status"
 
+    /** Bangumi 注册：未绑定的 Bangumi 账号 + 登录名/密码，一次完成建号与绑定 */
+    const val BANGUMI_REGISTER = "/api/user/auth/register/bangumi"
+
     /** 修改密码（用户改自己的） */
     const val USER_CHANGE_PASSWORD = "/api/user/auth/password"
 

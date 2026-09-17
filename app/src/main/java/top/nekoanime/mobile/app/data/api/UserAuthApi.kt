@@ -9,6 +9,20 @@ import top.nekoanime.mobile.app.config.ConfigLoader
 private object EmptyBody
 
 /**
+ * Bangumi 注册请求体。
+ *
+ * @param loginName 登录名（只允许字母、数字、下划线）
+ * @param password 密码
+ * @param tempId Bangumi 授权回调带回来的临时凭证
+ */
+@Serializable
+private data class BangumiRegisterBody(
+    @kotlinx.serialization.SerialName("login_name") val loginName: String,
+    val password: String,
+    @kotlinx.serialization.SerialName("temp_id") val tempId: String,
+)
+
+/**
  * 登录请求体。
  *
  * @param username 用户名
@@ -62,6 +76,23 @@ object UserAuthApi {
         path = "${ApiRoutes.BANGUMI_LOGIN_STATUS}?temp_id=$tempId",
         body = EmptyBody,
         bodySerializer = EmptyBody.serializer(),
+    )
+
+    /**
+     * 用 Bangumi 临时凭证注册并绑定。
+     *
+     * @description 服务端一次做完三件事：建号 → 绑定该 Bangumi 账号 →（新账号）用 Bangumi 的昵称头像初始化。
+     * 成功后调用方还需要用登录名+密码登录一次拿 JWT。
+     *
+     * @param username 登录名（只允许字母、数字、下划线）
+     * @param password 密码
+     * @param tempId Bangumi 授权回调带回来的临时凭证
+     * @returns 成功/失败（失败时 message 是后端的原因，例如"该 Bangumi 账号已绑定了"）
+     */
+    suspend fun bangumiRegister(username: String, password: String, tempId: String): Result<Unit> = ApiClient.postUnit(
+        path = ApiRoutes.BANGUMI_REGISTER,
+        body = BangumiRegisterBody(loginName = username, password = password, tempId = tempId),
+        bodySerializer = BangumiRegisterBody.serializer(),
     )
 
     /**

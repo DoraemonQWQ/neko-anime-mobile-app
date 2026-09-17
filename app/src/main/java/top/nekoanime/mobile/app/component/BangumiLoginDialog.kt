@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,6 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -54,8 +61,57 @@ fun BangumiLoginDialog(
 ) {
     var error by remember { mutableStateOf<String?>(null) }
     var exchanging by remember { mutableStateOf(false) }
+
+    // 未绑定的 Bangumi 账号：不把人堵死，就地补一个登录名+密码完成注册（昵称头像用 Bangumi 的）
+    var registerTempId by remember { mutableStateOf<String?>(null) }
+    var registerUsername by remember { mutableStateOf("") }
+    var registerPassword by remember { mutableStateOf("") }
+    var registerSubmitting by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
     val loginUrl = remember { UserAuthApi.bangumiLoginUrl() }
+
+    /** 提交 Bangumi 注册（建号 + 绑定 + 登录） */
+    fun submitRegister() {
+        val tempId = registerTempId ?: return
+        val name = registerUsername.trim()
+
+        if (!name.matches(Regex("^[A-Za-z0-9_]+$"))) {
+            error = "用户名只能包含字母、数字和下划线"
+
+            return
+        }
+
+        if (registerPassword.length < 6) {
+            error = "密码至少 6 位"
+
+            return
+        }
+
+        registerSubmitting = true
+        error = null
+
+        scope.launch {
+            UserAuthApi.bangumiRegister(name, registerPassword, tempId)
+                .onSuccess {
+                    // 注册成功即用刚设的账号密码登录，拿 JWT
+                    UserAuthApi.login(name, registerPassword)
+                        .onSuccess { token ->
+                            SessionState.onLoggedIn(token)
+                            onLoggedIn()
+                            onDismiss()
+                        }
+                        .onFailure {
+                            registerSubmitting = false
+                            error = "注册成功，但自动登录失败，请用刚才的账号密码登录"
+                        }
+                }
+                .onFailure {
+                    registerSubmitting = false
+                    error = it.message ?: "注册失败"
+                }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = NekoDialogShape, color = MaterialTheme.colorScheme.surface) {
@@ -85,6 +141,39 @@ fun BangumiLoginDialog(
                     )
                 }
 
+                if (registerTempId != null) {
+                    // 未绑定的 Bangumi 账号：就地注册（昵称与头像直接取 Bangumi 的）
+                    OutlinedTextField(
+                        value = registerUsername,
+                        onValueChange = { registerUsername = it },
+                        label = { Text("登录名（字母 / 数字 / 下划线）") },
+                        singleLine = true,
+                        enabled = !registerSubmitting,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            imeAction = ImeAction.Next,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = registerPassword,
+                        onValueChange = { registerPassword = it },
+                        label = { Text("密码（至少 6 位）") },
+                        singleLine = true,
+                        enabled = !registerSubmitting,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = { submitRegister() },
+                        enabled = !registerSubmitting &&
+                            registerUsername.isNotBlank() &&
+                            registerPassword.isNotBlank(),
+                    ) {
+                        Text(if (registerSubmitting) "注册中…" else "注册并登录")
+                    }
+                } else {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -116,9 +205,10 @@ fun BangumiLoginDialog(
                                                 onDismiss()
                                             }
                                             .onFailure {
+                                                // 没绑定过 → 切到注册表单；其它失败（比如授权过期）给提示
                                                 exchanging = false
-                                                error = "这个 Bangumi 账号还没有绑定本地账号。" +
-                                                    "请先在网页端用 Bangumi 注册/绑定，或换一个已绑定的账号。"
+                                                registerTempId = tempId
+                                                error = null
                                             }
                                     }
 
@@ -129,6 +219,7 @@ fun BangumiLoginDialog(
                         }
                     },
                 )
+                }
 
                 TextButton(
                     onClick = onDismiss,
