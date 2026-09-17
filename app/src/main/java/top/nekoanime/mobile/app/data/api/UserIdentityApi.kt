@@ -13,6 +13,18 @@ import kotlinx.serialization.Serializable
 private object UnbindBody
 
 /**
+ * 观看进度上报请求体（与后端 `UserUpdateViewEpisodeProgressRequest` 对齐）。
+ *
+ * @param progress 已观看秒数
+ * @param viewDate 本次观看时间（ISO 字符串）
+ */
+@Serializable
+private data class ProgressBody(
+    val progress: Int,
+    @kotlinx.serialization.SerialName("view_date") val viewDate: String,
+)
+
+/**
  * 用户身份接口（需要登录）。
  *
  * @description 对应后端 `UserIdentityController`（路由前缀是 `/api/user/data`，跟观看历史同一个前缀）：
@@ -107,5 +119,21 @@ object UserIdentityApi {
         path = ApiRoutes.USER_BANGUMI_UNBIND,
         body = UnbindBody,
         bodySerializer = UnbindBody.serializer(),
+    )
+
+    /**
+     * 上报某一集的观看进度（服务端的「继续观看 / 观看历史」靠它更新）。
+     *
+     * @param episodeId 剧集ID
+     * @param progressSeconds 已观看秒数
+     * @returns 成功/失败
+     */
+    suspend fun reportProgress(episodeId: Int, progressSeconds: Int): Result<Unit> = ApiClient.postUnit(
+        path = ApiRoutes.userEpisodeProgress(episodeId),
+        body = ProgressBody(
+            progress = progressSeconds,
+            viewDate = java.time.OffsetDateTime.now().toString(),
+        ),
+        bodySerializer = ProgressBody.serializer(),
     )
 }

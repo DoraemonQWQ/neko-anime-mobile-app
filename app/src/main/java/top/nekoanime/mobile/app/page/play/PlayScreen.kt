@@ -46,6 +46,10 @@ import top.nekoanime.mobile.app.page.play.component.player.NekoPlayer
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.component.rememberSaveableState
 import top.nekoanime.mobile.app.service.resolvePlaybackStart
+import top.nekoanime.mobile.app.data.api.UserIdentityApi
+import top.nekoanime.mobile.app.state.SessionState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 /** 播放页底部推荐几个 */
 private const val RecommendCount = 10
@@ -116,6 +120,10 @@ fun PlayScreen(
     // 这几个状态都保存下来：从别的播放页返回时不会「先空一下再重新请求」——
     // 上一次播的那一集、播放地址、推荐列表都还在，直接接着用（播放器实例也还在，见 PlaybackViewModel）
     var currentEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(start.episodeId) }
+
+    /** 上报进度的协程作用域与上次上报时间（播放中每 15 秒上报一次，避免每帧都打接口） */
+    val scope = rememberCoroutineScope()
+    var lastReportedMs by remember { mutableStateOf(0L) }
     var resumePositionMs by rememberSaveable(anime.id) { mutableLongStateOf(start.positionMs) }
 
     val currentEpisode = anime.episodes.firstOrNull { it.id == currentEpisodeId }
@@ -211,6 +219,16 @@ fun PlayScreen(
                         // 播放中周期性写本地：只要真在播（有位置、有时长）就记
                         if (positionMs > 0 && durationMs > 0) {
                             progressStore.save(anime.id, episodeId, positionMs)
+
+                            // 登录用户同时上报服务端：不报的话 App 里看的进度不会进「继续观看」
+                            val now = System.currentTimeMillis()
+
+                            if (SessionState.loggedIn && now - lastReportedMs >= 15_000) {
+                                lastReportedMs = now
+                                scope.launch {
+                                    UserIdentityApi.reportProgress(episodeId, (positionMs / 1000).toInt())
+                                }
+                            }
                         }
                     },
                     modifier = playerModifier(fullscreen),

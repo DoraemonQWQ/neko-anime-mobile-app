@@ -85,6 +85,14 @@ object ApiRoutes {
     /** 解绑 Bangumi（需要登录） */
     const val USER_BANGUMI_UNBIND = "/api/user/data/bangumi/unbind"
 
+    /**
+     * 上报某一集的观看进度（需要登录）。
+     *
+     * @param episodeId 剧集ID
+     * @returns 接口路径
+     */
+    fun userEpisodeProgress(episodeId: Int): String = "/api/user/data/episode/$episodeId/progress"
+
     // ==================== 客户端更新（公开） ====================
 
     /** 检查更新 */
