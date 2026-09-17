@@ -56,8 +56,7 @@ import top.nekoanime.mobile.app.component.appendDistinct
 import top.nekoanime.mobile.app.component.FilterSelector
 import top.nekoanime.mobile.app.component.LoginDialog
 import top.nekoanime.mobile.app.component.AnimeGridSkeleton
-import top.nekoanime.mobile.app.component.HeroSkeleton
-import top.nekoanime.mobile.app.component.HomeRowSkeleton
+import top.nekoanime.mobile.app.component.HomeSkeleton
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.AnimeFilterOptions
 import top.nekoanime.mobile.app.config.ConfigLoader
@@ -339,6 +338,15 @@ private fun HomeTabContent(
             verticalArrangement = Arrangement.spacedBy(SectionSpacing),
         ) {
         when {
+            /*
+             * 等首页三块（轮播 / 题材推荐 / 继续观看）**全部**拿完再一次性换成真内容。
+             *
+             * 判断条件必须用 loading 本身：之前写成 loading && hot.isEmpty() && rows.isEmpty()，
+             * 而 hot 是第一个拿回来的 → 骨架提前撤掉 → 就出现"轮播先出来、下面空一片、
+             * 然后卡片突然蹦出来"。用 loading 就不会有一点一点往外冒的过程。
+             */
+            loading -> HomeSkeleton()
+
             failed -> Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -354,32 +362,12 @@ private fun HomeTabContent(
             }
 
             else -> {
-                /*
-                 * 按区块出骨架，不用整页骨架：
-                 * 整页骨架要等「轮播 + 推荐都到齐」才换真内容，中间必然出现
-                 * "轮播先出来 → 下面白一大片 → 番剧行突然蹦出来"的观感。
-                 * 现在每一块各自占位、各自替换，页面高度从一开始就是稳定的。
-                 */
-                if (hot.isEmpty()) {
-                    HeroSkeleton()
-                } else {
-                    HomeHero(slides = hot, onOpenAnime = onOpenAnime)
-                }
+                HomeHero(slides = hot, onOpenAnime = onOpenAnime)
 
-                // 继续观看只在有数据时出现（未登录/没看过就没有这一块，不占位）
-                if (continueWatching.isNotEmpty()) {
-                    ContinueWatchingRow(items = continueWatching, onContinue = onContinue)
-                }
+                ContinueWatchingRow(items = continueWatching, onContinue = onContinue)
 
-                if (rows.isEmpty()) {
-                    // 推荐的题材行还没到：先摆两条占位行（数量与配置里的题材数一致）
-                    repeat(homeConfig.recommendTags.size.coerceAtLeast(1)) {
-                        HomeRowSkeleton()
-                    }
-                } else {
-                    rows.forEach { row ->
-                        AnimeRow(title = row.title, animes = row.animes, onOpenAnime = onOpenAnime)
-                    }
+                rows.forEach { row ->
+                    AnimeRow(title = row.title, animes = row.animes, onOpenAnime = onOpenAnime)
                 }
             }
         }
