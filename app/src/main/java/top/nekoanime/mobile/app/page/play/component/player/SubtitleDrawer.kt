@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.sp
  * @param tracks 内嵌字幕轨（顺序与文件里一致）
  * @param onDisable 关闭字幕
  * @param onSelect 选中某条字幕轨
+ * @param width 面板宽度（竖屏传窄的那档，见 PlayerDrawerNarrowWidth）
  * @param modifier 由播放器给出的尺寸约束（宽度在这里定）
  */
 @Composable
@@ -49,12 +51,13 @@ internal fun SubtitleDrawer(
     tracks: List<SubtitleTrack>,
     onDisable: () -> Unit,
     onSelect: (SubtitleTrack) -> Unit,
+    width: Dp = PlayerDrawerWidth,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(PlayerDrawerWidth)
+            .width(width)
             .background(PlayerDrawerPanelColor)
             // 面板整体吃掉触摸：点标题、点按钮之间的空隙都算"点在抽屉里"，
             // 既不会把抽屉关掉，也不会穿透到底下的播放/进度条/全屏按钮上。
@@ -145,7 +148,7 @@ private fun SubtitleOptionButton(
         contentAlignment = Alignment.CenterStart,
     ) {
         Text(
-            text = label,
+            text = shortenLabel(label),
             color = if (active) Color.White else Color.White.copy(alpha = 0.88f),
             fontSize = 14.sp,
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
@@ -154,3 +157,16 @@ private fun SubtitleOptionButton(
         )
     }
 }
+
+/**
+ * 名字太长的截断（超过 [PlayerDrawerLabelMaxLength] 个字就砍掉加省略号）。
+ *
+ * @param label 原始名字
+ * @returns 可直接显示的名字
+ */
+private fun shortenLabel(label: String): String =
+    if (label.length > PlayerDrawerLabelMaxLength) {
+        label.take(PlayerDrawerLabelMaxLength) + "…"
+    } else {
+        label
+    }

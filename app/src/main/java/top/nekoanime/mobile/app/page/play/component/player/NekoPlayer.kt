@@ -923,6 +923,13 @@ fun NekoPlayer(
         // 遮罩夹在控制栏和抽屉之间，是为了「点抽屉外面就关闭」——
         // 如果遮罩在控制栏下面，点在控制栏区域会先触发播放/进度条，而不是关抽屉。
         // 两个抽屉（选集 / 字幕）共用这一套遮罩与层级，同一时刻只会开一个。
+        // 遮罩要给抽屉让出的宽度得跟当前抽屉一致：竖屏的字幕抽屉是窄的那档
+        val activeDrawerWidth = if (subtitleDrawerOpen && !fullscreen) {
+            PlayerDrawerNarrowWidth
+        } else {
+            PlayerDrawerWidth
+        }
+
         if (drawerOpen || subtitleDrawerOpen) {
             // 遮罩分两层，别把"点阴影关闭"做成一整块都能关：
             // 1) 整块压暗——纯绘制，不接任何手势；
@@ -938,7 +945,7 @@ fun NekoPlayer(
                         .fillMaxHeight()
                         .fillMaxWidth()
                         // 给抽屉让出右侧宽度：padding 之后的这段才是点击命中区（左侧阴影）
-                        .padding(end = PlayerDrawerWidth)
+                        .padding(end = activeDrawerWidth)
                         .pointerInput(Unit) {
                             detectTapGestures {
                                 drawerOpen = false
@@ -980,6 +987,8 @@ fun NekoPlayer(
         ) {
             SubtitleDrawer(
                 tracks = subtitleTracks,
+                // 竖屏播放器本来就矮，面板收窄一点，别把画面盖严
+                width = if (fullscreen) PlayerDrawerWidth else PlayerDrawerNarrowWidth,
                 onDisable = {
                     player.trackSelectionParameters = player.trackSelectionParameters
                         .buildUpon()
