@@ -49,6 +49,8 @@ import top.nekoanime.mobile.app.service.resolvePlaybackStart
 import top.nekoanime.mobile.app.data.api.UserIdentityApi
 import top.nekoanime.mobile.app.state.SessionState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.DisposableEffect
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 /** 播放页底部推荐几个 */
@@ -121,9 +123,56 @@ fun PlayScreen(
     // 上一次播的那一集、播放地址、推荐列表都还在，直接接着用（播放器实例也还在，见 PlaybackViewModel）
     var currentEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(start.episodeId) }
 
-    /** 上报进度的协程作用域与上次上报时间（播放中每 15 秒上报一次，避免每帧都打接口） */
+    /**
+     * 上报进度的作用域与节流状态。
+     *
+     * @description 定时 30 秒一次；切集、离开播放页这类关键时机立刻补一次。
+     * 「距离结尾 120 秒内」由服务端判定为已看完，所以只要结尾附近报过一次就能标记完成。
+     */
     val scope = rememberCoroutineScope()
-    var lastReportedMs by remember { mutableStateOf(0L) }
+    var lastReportedAtMs by remember { mutableStateOf(0L) }
+    var lastPositionSeconds by remember { mutableStateOf(0) }
+    var lastReportedSeconds by remember { mutableStateOf(0) }
+
+    /**
+     * 上报当前剧集的观看进度（仅登录用户）。
+     *
+     * @param force true 表示忽略节流（切集 / 离开页面这类关键时机用）
+     */
+    fun reportProgress(force: Boolean = false) {
+        if (!SessionState.loggedIn) {
+            return
+        }
+
+        val seconds = lastPositionSeconds
+
+        if (seconds <= 0) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+
+        // 定时上报的节流：不到 30 秒、或者位置只挪了不到 5 秒，都不发
+        if (!force &&
+            (now - lastReportedAtMs < 30_000 || abs(seconds - lastReportedSeconds) < 5)
+        ) {
+            return
+        }
+
+        lastReportedAtMs = now
+        lastReportedSeconds = seconds
+
+        val episodeId = currentEpisodeId
+
+        scope.launch {
+            UserIdentityApi.reportProgress(episodeId, seconds)
+        }
+    }
+
+    // 离开播放页时补一次（用户可能直接返回，不等下一次定时）
+    DisposableEffect(anime.id) {
+        onDispose { reportProgress(force = true) }
+    }
     var resumePositionMs by rememberSaveable(anime.id) { mutableLongStateOf(start.positionMs) }
 
     val currentEpisode = anime.episodes.firstOrNull { it.id == currentEpisodeId }
@@ -182,6 +231,9 @@ fun PlayScreen(
 
     /** 切集：跳到这一集自己的本地进度，并把"这个番看到第几集"一起更新 */
     fun switchEpisode(episodeId: Int) {
+        // 切集前先把这一集看到哪儿补报一次
+        reportProgress(force = true)
+
         currentEpisodeId = episodeId
         resumePositionMs = progressStore.readPositionMs(episodeId)
         progressStore.save(anime.id, episodeId, resumePositionMs)
@@ -220,15 +272,9 @@ fun PlayScreen(
                         if (positionMs > 0 && durationMs > 0) {
                             progressStore.save(anime.id, episodeId, positionMs)
 
-                            // 登录用户同时上报服务端：不报的话 App 里看的进度不会进「继续观看」
-                            val now = System.currentTimeMillis()
-
-                            if (SessionState.loggedIn && now - lastReportedMs >= 15_000) {
-                                lastReportedMs = now
-                                scope.launch {
-                                    UserIdentityApi.reportProgress(episodeId, (positionMs / 1000).toInt())
-                                }
-                            }
+                            // 登录用户同时上报服务端（节流在 reportProgress 里）
+                            lastPositionSeconds = (positionMs / 1000).toInt()
+                            reportProgress()
                         }
                     },
                     modifier = playerModifier(fullscreen),
