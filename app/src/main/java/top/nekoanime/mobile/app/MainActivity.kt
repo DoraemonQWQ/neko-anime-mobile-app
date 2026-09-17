@@ -3,6 +3,7 @@ package top.nekoanime.mobile.app
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
@@ -41,6 +43,7 @@ import kotlinx.coroutines.launch
 import top.nekoanime.mobile.app.component.UpdateDialog
 import top.nekoanime.mobile.app.component.theme.NekoPlayerTheme
 import top.nekoanime.mobile.app.config.ConfigLoader
+import top.nekoanime.mobile.app.data.local.UpdatePreference
 import top.nekoanime.mobile.app.model.dto.AppUpdateDto
 import top.nekoanime.mobile.app.page.history.HistoryScreen
 import top.nekoanime.mobile.app.page.home.HomeScreen
@@ -49,6 +52,7 @@ import top.nekoanime.mobile.app.page.play.PlayRouteScreen
 import top.nekoanime.mobile.app.page.search.SearchScreen
 import top.nekoanime.mobile.app.page.settings.SettingsScreen
 import top.nekoanime.mobile.app.page.splash.SplashScreen
+import top.nekoanime.mobile.app.service.UpdateService
 import top.nekoanime.mobile.app.state.SessionState
 
 /**
@@ -68,19 +72,23 @@ class MainActivity : ComponentActivity() {
     /** 是否全屏（播放页用） */
     private var fullscreen by mutableStateOf(false)
 
-    /** 当前是否在播放页（系统栏图标明暗与更新弹窗都要看它） */
+    /** 当前是否在播放页（系统栏图标的明暗要看它） */
     private var onPlayPage by mutableStateOf(false)
 
-    /** 当前是否在首页（更新弹窗只在首页弹） */
+    /** 当前是否在首页（主动提示只在这一页弹；强制更新不看它） */
     private var onHomePage by mutableStateOf(true)
 
     /**
-     * 启动时检查到的新版本。
+     * 待提示的新版本。
      *
-     * @description 启动页在初始化阶段就发起检查（见 {@link SplashScreen}），
-     * 检查结果先存在这里：进首页之后再弹更新窗，避免弹窗压在启动页上。
+     * @description 两个来源：启动页初始化阶段查到的（见 {@link SplashScreen}）、
+     * 以及 App 从后台回到前台时补查到的。结果先存在这里：
+     * 强制更新立刻弹，主动提示等回到首页再弹。
      */
     private var pendingUpdate by mutableStateOf<AppUpdateDto?>(null)
+
+    /** 是否已经走过一次 onStart（冷启动那次启动页已经查过了，不该再查一遍） */
+    private var startedOnce = false
 
     /**
      * 首页选中的底部 Tab。
@@ -155,7 +163,9 @@ class MainActivity : ComponentActivity() {
                     fullscreen = fullscreen,
                     onToggleFullscreen = { applyFullscreen(!fullscreen) },
                     onReadyFromSplash = { update ->
-                        pendingUpdate = update
+                        // 启动页查到的版本跟「回到前台」查到的走同一套判断
+                        applyUpdate(update)
+
                         navController.navigate(HomeRoute) {
                             // 启动页用完就从栈里去掉，返回键不会再回到它
                             popUpTo<SplashRoute> { inclusive = true }
@@ -167,10 +177,14 @@ class MainActivity : ComponentActivity() {
                     onSearchKeywordChange = { searchKeyword = it },
                 )
 
-                // 启动检查到的新版本：进入首页后才弹窗（用户在启动页时不该看见弹窗）
+                /*
+                 * 待提示的版本怎么弹：
+                 * - **强制更新**：不管在哪个页面、有没有勾过「不再提示」，直接弹；
+                 * - **主动提示**：只在首页弹（启动页查到的等进首页、回前台查到的等回到首页）。
+                 */
                 val update = pendingUpdate
 
-                if (update != null && onHomePage) {
+                if (update != null && (update.force || onHomePage)) {
                     UpdateDialog(
                         info = update,
                         onDismiss = { pendingUpdate = null },
@@ -178,6 +192,61 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * App 从后台回到前台。
+     *
+     * @description 冷启动那一次 onStart 紧跟在 onCreate 后面，启动页已经查过一遍更新了，
+     * 这里跳过，免得同一秒查两次。之后每次回到前台都补查一次：
+     * 用户挂着 App 好几天、期间服务端发了新版本，切回来就能看到提示。
+     */
+    override fun onStart() {
+        super.onStart()
+
+        if (!startedOnce) {
+            startedOnce = true
+            return
+        }
+
+        refreshUpdateOnForeground()
+    }
+
+    /**
+     * 回到前台时补查一次更新。
+     *
+     * @description 查到的版本交给 [applyUpdate] 判断要不要提示；
+     * 网络失败或已是最新时什么都不做（不回退掉已经在提示的那条）。
+     */
+    private fun refreshUpdateOnForeground() {
+        lifecycleScope.launch {
+            val result = UpdateService.check()
+
+            result
+                .onSuccess { info -> applyUpdate(info) }
+                .onFailure { error -> Log.d("NekoUpdate", "回到前台检查更新失败：${error.message}") }
+        }
+    }
+
+    /**
+     * 判断检查到的版本要不要挂成待提示。
+     *
+     * @description 规则只有一条：强制更新无条件提示；主动提示要用户没勾过「7 天内不再提示」。
+     * 至于"当前在不在首页"，是弹窗的时候才看（见 setContent 里的判断）。
+     *
+     * @param info 检查更新返回的版本信息；null 表示已是最新
+     */
+    private fun applyUpdate(info: AppUpdateDto?) {
+        if (info == null) {
+            return
+        }
+
+        if (!info.force && UpdatePreference(this).isSnoozed()) {
+            Log.i("NekoUpdate", "回到前台发现新版本 ${info.version}，但用户勾过不再提示，跳过")
+            return
+        }
+
+        pendingUpdate = info
     }
 
     /**

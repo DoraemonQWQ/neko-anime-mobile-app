@@ -27,7 +27,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import top.nekoanime.mobile.app.R
-import top.nekoanime.mobile.app.data.local.UpdatePreference
 import top.nekoanime.mobile.app.model.dto.AppUpdateDto
 import top.nekoanime.mobile.app.service.UpdateService
 import top.nekoanime.mobile.app.state.SessionState
@@ -49,8 +48,9 @@ private const val MinSplashMillis = 700L
  * 3. **清理更新目录**：上次下载中断留下的 `.part` 半成品、以及不再是目标版本的旧安装包；
  * 4. 保证启动页至少显示 {@link MinSplashMillis}，避免界面闪一下。
  *
- * 结束后通过 [onReady] 把「有没有新版本」交给上层：进首页后由上层弹更新窗，
- * 这样弹窗出现在首页而不是启动页上（跟用户要的行为一致）。
+ * 结束后通过 [onReady] 把「有没有新版本」原样交给上层：
+ * 「强制更新 / 勾过 7 天内不再提示 / 当前在不在首页」这些判断统一在上层做，
+ * 免得同一个规则在启动页和「回到前台」两条路径上各写一遍、慢慢走样。
  *
  * @param onReady 初始化完成回调；参数是新版本信息（没有更新或检查失败时为 null）
  */
@@ -86,10 +86,8 @@ fun SplashScreen(onReady: (AppUpdateDto?) -> Unit) {
             delay(MinSplashMillis - elapsed)
         }
 
-        // 用户勾过「7 天内不再提示」就安静启动（强制更新除外）
-        val visible = update?.takeIf { it.force || !UpdatePreference(context).isSnoozed() }
-
-        onReady(visible)
+        // 该不该弹交给上层判断（强制更新、不再提示、当前页面都在那边一起看）
+        onReady(update)
     }
 
     Box(
