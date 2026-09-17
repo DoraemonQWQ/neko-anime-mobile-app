@@ -202,6 +202,46 @@ fun HomeSkeleton() {
 }
 
 /**
+ * 首页轮播的骨架（16:9 灰块）。
+ *
+ * @description 首页改成"按区块出骨架"后用它：轮播数据没到就先占住这块高度，
+ * 否则会出现"轮播先出来、下面白一大片，然后番剧行突然蹦出来"。
+ */
+@Composable
+fun HeroSkeleton() {
+    SkeletonBlock(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f),
+    )
+}
+
+/**
+ * 首页一个题材行的骨架（标题条 + 一排卡片）。
+ *
+ * @description 与真实行 [AnimeRow] 的结构一致，尺寸也照抄，数据到位时不会跳位。
+ */
+@Composable
+fun HomeRowSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SkeletonBlock(
+                modifier = Modifier.size(width = 4.dp, height = 16.dp),
+                shape = RoundedCornerShape(2.dp),
+            )
+            SkeletonBlock(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .size(width = 120.dp, height = 16.dp),
+                shape = RoundedCornerShape(4.dp),
+            )
+        }
+
+        SkeletonPosterRow(count = 3, startPadding = 0.dp, topPadding = 0.dp)
+    }
+}
+
+/**
  * 观看历史骨架（封面 + 右侧两行文字）。
  *
  * @param rows 占位条数
