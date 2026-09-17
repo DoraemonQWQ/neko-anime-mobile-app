@@ -65,7 +65,10 @@ object UpdateService {
             path = ApiRoutes.APP_UPDATE,
             query = mapOf(
                 "platform" to platform,
-                "version" to BuildConfig.VERSION_NAME,
+                // dev / test 包的版本号带 -dev / -test 后缀，服务端按数字段比较时会把
+                // 「1.2.16-dev」解析成 1.2.0，导致这些包每次都被判定为"有新版本"。
+                // 只把数字段报上去，后缀是本机打包方式，跟服务端版本比大小无关。
+                "version" to BuildConfig.VERSION_NAME.substringBefore('-'),
                 "channel" to config.channel,
             ),
             serializer = AppUpdateDto.serializer(),
@@ -114,6 +117,22 @@ object UpdateService {
 
             val url = resolveUrl(info.downloadUrl)
             var startAt = if (partial.exists()) partial.length() else 0L
+
+            /*
+             * 残留分片不能无条件续传。
+             *
+             * 分片只跟"文件名里的版本号"绑定，服务端万一换了包（早先所有版本共用一个下载地址时就
+             * 出过这事），从旧分片往后接着下，拼出来的就是一个前半截旧、后半截新的四不像，
+             * 大小可能还对，MD5 必然对不上。分片不小于目标包时直接丢弃重下。
+             */
+            if (info.fileSize > 0 && startAt >= info.fileSize) {
+                Log.w(
+                    "NekoUpdate",
+                    "本地残留分片 $startAt 字节，目标包只有 ${info.fileSize} 字节，丢弃后重新下载",
+                )
+                partial.delete()
+                startAt = 0L
+            }
 
             val request = Request.Builder()
                 .url(url)
@@ -169,6 +188,17 @@ object UpdateService {
 
             if (!partial.exists() || partial.length() <= 0) {
                 error("下载失败：文件为空")
+            }
+
+            /*
+             * 大小先对上再算 MD5：CDN 半路截断、续传起点错位这些情况看大小最直观，
+             * 报"下载不完整"比报"MD5 不一致"更容易定位（后者会被当成服务端文件坏了）。
+             */
+            if (info.fileSize > 0 && partial.length() != info.fileSize) {
+                val actualSize = partial.length()
+
+                partial.delete()
+                error("安装包不完整（已下载 $actualSize / ${info.fileSize} 字节），请重新下载")
             }
 
             if (info.fileMd5.isNotBlank()) {
