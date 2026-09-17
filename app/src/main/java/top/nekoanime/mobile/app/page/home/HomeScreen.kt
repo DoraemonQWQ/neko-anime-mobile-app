@@ -289,13 +289,17 @@ private fun HomeTabContent(
         loading = true
         failed = false
 
+        // 刷新就是"重新来一遍"：先清空旧数据再请求，避免旧内容还挂着、新内容回来混在一起。
+        // 请求失败时列表为空，下面的 failed 分支会给出错误提示，而不是留着过期数据假装成功。
+        hot.clear()
+        rows.clear()
+        continueWatching.clear()
+
         // 1) 轮播：后端热门，最多 carouselMax 个
         val hotResult = AnimeRepository.hot()
-        hot.clear()
         hot.addAll(hotResult.getOrDefault(emptyList()))
 
         // 2) 题材推荐：配置里配了几个题材就几组，标题 = 前缀 + 题材
-        rows.clear()
         rows.addAll(
             homeConfig.recommendTags.mapNotNull { tag ->
                 AnimeRepository.recommendByTag(tag)
@@ -306,7 +310,6 @@ private fun HomeTabContent(
         )
 
         // 3) 继续观看：需要登录；未登录后端会 401，这里就是空列表（整块不显示）
-        continueWatching.clear()
         continueWatching.addAll(
             UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
         )
