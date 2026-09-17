@@ -50,6 +50,7 @@ fun LoginDialog(
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
+    var bangumiOpen by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -135,6 +136,11 @@ fun LoginDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+
+                // Bangumi 一键登录：账号没绑定过时会提示先去网页端注册/绑定
+                TextButton(onClick = { bangumiOpen = true }, enabled = !submitting) {
+                    Text("用 Bangumi 账号登录")
+                }
             }
         },
         confirmButton = {
@@ -149,4 +155,14 @@ fun LoginDialog(
             TextButton(enabled = !submitting, onClick = onDismiss) { Text("取消") }
         },
     )
+
+    if (bangumiOpen) {
+        BangumiLoginDialog(
+            onDismiss = { bangumiOpen = false },
+            onLoggedIn = {
+                onLoggedIn()
+                onDismiss()
+            },
+        )
+    }
 }

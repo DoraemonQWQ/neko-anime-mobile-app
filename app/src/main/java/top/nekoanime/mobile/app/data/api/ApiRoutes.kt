@@ -49,6 +49,12 @@ object ApiRoutes {
     /** 前台登录（返回 JWT 纯文本） */
     const val USER_LOGIN = "/api/user/auth/login"
 
+    /** Bangumi 一键登录：授权入口（浏览器/WebView 打开，带 redirect_url 参数） */
+    const val BANGUMI_LOGIN = "/api/auth/oauth/login/bangumi"
+
+    /** Bangumi 一键登录：用 temp_id 换 JWT（POST，带 temp_id 查询参数） */
+    const val BANGUMI_LOGIN_STATUS = "/api/auth/oauth/login/bangumi/status"
+
     /** 修改密码（用户改自己的） */
     const val USER_CHANGE_PASSWORD = "/api/user/auth/password"
 

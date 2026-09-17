@@ -2,6 +2,11 @@ package top.nekoanime.mobile.app.data.api
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
+import top.nekoanime.mobile.app.config.ConfigLoader
+
+/** 空请求体：状态接口只要查询参数，但客户端方法需要一个序列化器 */
+@Serializable
+private object EmptyBody
 
 /**
  * 登录请求体。
@@ -31,6 +36,34 @@ private data class ChangePasswordBody(
  * 移动端把 token 存本地，之后每个请求带 `Authorization: Bearer <token>`。
  */
 object UserAuthApi {
+    /**
+     * 拼 Bangumi 授权地址（交给内置 WebView 打开）。
+     *
+     * @description 回跳地址用站点自身的 `/oauth/callback`：后端授权完成后会带 `temp_id`
+     * 跳回这个地址，App 侧在 WebView 里拦下这个跳转、取出 temp_id 去换 JWT。
+     *
+     * @param redirectUrl 回调地址（默认站点回调页）
+     * @returns 完整的授权入口地址
+     */
+    fun bangumiLoginUrl(redirectUrl: String = "https://www.nekoanime.top/oauth/callback"): String {
+        val base = ConfigLoader.config.api.baseUrl.trimEnd('/')
+        val encoded = java.net.URLEncoder.encode(redirectUrl, "UTF-8")
+
+        return "$base${ApiRoutes.BANGUMI_LOGIN}?redirect_url=$encoded"
+    }
+
+    /**
+     * 用 temp_id 换 JWT（Bangumi 授权完成后调用）。
+     *
+     * @param tempId WebView 拦下来的临时凭证
+     * @returns 成功是 JWT token；账号未绑定/授权过期等会失败
+     */
+    suspend fun bangumiLoginStatus(tempId: String): Result<String> = ApiClient.postText(
+        path = "${ApiRoutes.BANGUMI_LOGIN_STATUS}?temp_id=$tempId",
+        body = EmptyBody,
+        bodySerializer = EmptyBody.serializer(),
+    )
+
     /**
      * 登录。
      *
