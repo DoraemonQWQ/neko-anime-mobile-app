@@ -26,8 +26,8 @@ android {
         applicationId = "top.nekoanime.mobile.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.2.2"
+        versionCode = 11
+        versionName = "1.2.3"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")

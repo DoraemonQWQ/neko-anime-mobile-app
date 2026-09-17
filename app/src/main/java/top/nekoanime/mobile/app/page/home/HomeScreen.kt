@@ -268,8 +268,15 @@ private fun HomeTabContent(
     var refreshing by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
-        // 已经有数据（从二级页返回）且不是手动刷新：直接用缓存，不再打接口
+        // 从二级页返回（已有数据、也不是手动刷新）：
+        // 轮播与题材推荐直接用缓存不重拉，但「继续观看」必须刷新一下——
+        // 用户刚看完一集回来，那一行要反映最新进度。
         if (loadedOnce && reloadKey == 0) {
+            continueWatching.clear()
+            continueWatching.addAll(
+                UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
+            )
+
             loading = false
             return@LaunchedEffect
         }
