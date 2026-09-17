@@ -62,7 +62,24 @@ fun HomeHero(
         return
     }
 
-    val pagerState = rememberPagerState(pageCount = { items.size })
+    /*
+     * 无限轮播：给 Pager 一个"很大的虚拟页数"，真实下标用取模映射，
+     * 这样往左滑到头会无缝接到最后一张、往右滑到头会无缝接到第一张，
+     * 自动播放也永远是一个方向往前翻（不会像取模那样从最后一张"倒刷"回第一张）。
+     * 只有一张时不需要循环，保持普通分页。
+     */
+    val infinite = items.size > 1
+    val virtualPageCount = if (infinite) Int.MAX_VALUE else items.size
+    val startPage = if (infinite) {
+        // 从中间开始，且这个虚拟页要正好映射到第 0 张
+        val middle = Int.MAX_VALUE / 2
+
+        middle - middle % items.size
+    } else {
+        0
+    }
+
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { virtualPageCount })
 
     // 自动轮播：拖动过程中不翻页；刚滑完等一会儿再继续
     LaunchedEffect(pagerState, items.size) {
@@ -74,7 +91,7 @@ fun HomeHero(
                 continue
             }
 
-            pagerState.animateScrollToPage((pagerState.currentPage + 1) % items.size)
+            pagerState.animateScrollToPage(pagerState.currentPage + 1)
         }
     }
 
@@ -91,7 +108,9 @@ fun HomeHero(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
-                HeroSlide(anime = items[page], onClick = { onOpenAnime(items[page].id) })
+                val item = items[page % items.size]
+
+                HeroSlide(anime = item, onClick = { onOpenAnime(item.id) })
             }
         }
 
@@ -103,7 +122,7 @@ fun HomeHero(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             repeat(items.size) { index ->
-                val active = index == pagerState.currentPage
+                val active = index == pagerState.currentPage % items.size
 
                 Box(
                     modifier = Modifier
