@@ -442,6 +442,12 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.exitAnimation(): E
  * @returns 进入动画
  */
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnterAnimation(): EnterTransition = when {
+    /*
+     * 从搜索页返回：下面的页面也要用搜索页那一套（缩放 + 淡入）。
+     * 只处理 targetIsSearch() 是不够的——返回时 initial 才是搜索页，
+     * 少这条就会出现"搜索页缩着消失、下面页面却整体滑进来"的错配。
+     */
+    initialIsSearch() -> searchEnterTransition()
     targetIsSearch() -> searchEnterTransition()
     else -> slideInHorizontally(animationSpec = tween(260)) { -it / 4 } + fadeIn(tween(260))
 }
