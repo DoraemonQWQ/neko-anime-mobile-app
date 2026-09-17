@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    测试包覆盖：桌面上显示成 "Neko Anime Test"，与正式版 / dev 版一眼区分。
+-->
+<resources>
+    <string name="app_name">Neko Anime Test</string>
+</resources>

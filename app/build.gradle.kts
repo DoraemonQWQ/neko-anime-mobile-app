@@ -26,8 +26,8 @@ android {
         applicationId = "top.nekoanime.mobile.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.2.12"
+        versionCode = 21
+        versionName = "1.2.13"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")
@@ -41,6 +41,19 @@ android {
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
             }
+        }
+
+        /*
+         * 测试包专用签名。
+         *
+         * 用一对**公开的**测试密钥（口令就写在下面）：测试包要能随便发给别人装，
+         * 绝不能拿正式签名去签；反过来测试密钥也永远不要用于正式发布。
+         */
+        create("testKey") {
+            storeFile = rootProject.file("keystore/test-keystore.jks")
+            storePassword = "nekotest123"
+            keyAlias = "neko-test"
+            keyPassword = "nekotest123"
         }
     }
 
@@ -64,6 +77,21 @@ android {
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+
+        /*
+         * 测试包（assembleBeta 产出）。
+         *
+         * - 包名 top.nekoanime.mobile.app.test：与正式包、dev 包三者可同时安装；
+         * - 名称与图标在 app/src/beta/res 里覆盖成「Neko Anime Test」+ 蓝色图标；
+         * - 签名用测试密钥，配置走线上的 config.release.json；
+         * - 继承 release（debuggable = false），性能接近正式版，动画不会像 debug 那样糊。
+         */
+        create("beta") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-test"
+            signingConfig = signingConfigs.getByName("testKey")
         }
     }
 

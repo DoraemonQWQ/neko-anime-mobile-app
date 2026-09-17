@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    测试包覆盖自适应图标的背景色（Android 8.0+ 生效）：
+    正式版是品牌粉、dev 版是橙色，测试包用蓝色。
+-->
+<resources>
+    <color name="ic_launcher_background">#2F6BFF</color>
+</resources>
