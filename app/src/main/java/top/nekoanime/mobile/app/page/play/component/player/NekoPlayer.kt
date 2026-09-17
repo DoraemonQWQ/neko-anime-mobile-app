@@ -15,12 +15,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,11 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -55,7 +50,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -153,7 +147,6 @@ private const val MaxSeekFractionPerDrag = 0.5f
 // 这里用 androidx 的 @OptIn（不是 kotlin.OptIn，那个要求标记注解是 Kotlin 的 @RequiresOptIn）：
 // 它只作用于本函数，不会把这个要求传染给调用方（MainActivity / PlayerScreen 不用跟着标）。
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NekoPlayer(
     player: ExoPlayer,
@@ -905,65 +898,23 @@ fun NekoPlayer(
                 },
                 // 选集抽屉按钮只在全屏显示（竖屏时选集列表就在播放器下面），且至少要两集才有意义
                 episodeDrawer = if (fullscreen && sortedEpisodes.size > 1) {
-                    { drawerOpen = true }
+                    {
+                        subtitleDrawerOpen = false
+                        drawerOpen = true
+                    }
                 } else {
                     null
                 },
                 // 字幕按钮：文件里确实带内嵌字幕轨才显示（没有字幕的文件上摆个按钮只会让人以为坏了）
                 subtitleDrawer = if (subtitleTracks.isNotEmpty()) {
-                    { subtitleDrawerOpen = true }
+                    {
+                        drawerOpen = false
+                        subtitleDrawerOpen = true
+                    }
                 } else {
                     null
                 },
             )
-        }
-
-        // ===== 字幕抽屉 =====
-        //
-        // 列的是**文件自带的内嵌字幕轨**（内封的 MKV 里就有简繁两条）；
-        // 想切外挂字幕得让服务端另外抽一份 VTT，这里先不做。
-        if (subtitleDrawerOpen) {
-            ModalBottomSheet(
-                onDismissRequest = { subtitleDrawerOpen = false },
-                containerColor = MaterialTheme.colorScheme.surface,
-            ) {
-                Text(
-                    text = "字幕",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
-                )
-
-                // 「关闭字幕」永远排第一：没有字幕轨时也能一眼看出当前是关着的
-                SubtitleOptionRow(
-                    label = "关闭字幕",
-                    selected = subtitleTracks.none { it.selected },
-                    onClick = {
-                        player.trackSelectionParameters = player.trackSelectionParameters
-                            .buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                            .build()
-                        subtitleDrawerOpen = false
-                    },
-                )
-
-                subtitleTracks.forEach { track ->
-                    SubtitleOptionRow(
-                        label = track.label,
-                        selected = track.selected,
-                        onClick = {
-                            player.trackSelectionParameters = player.trackSelectionParameters
-                                .buildUpon()
-                                // 之前关过字幕的话这里要重新打开，否则选了轨也不显示
-                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                .setOverrideForType(track.override)
-                                .build()
-                            subtitleDrawerOpen = false
-                        },
-                    )
-                }
-            }
         }
 
         // ===== 全屏选集抽屉 =====
@@ -971,7 +922,8 @@ fun NekoPlayer(
         // 层级（从低到高）：画面 < 手势层 < 控制栏 < 遮罩 < 抽屉。
         // 遮罩夹在控制栏和抽屉之间，是为了「点抽屉外面就关闭」——
         // 如果遮罩在控制栏下面，点在控制栏区域会先触发播放/进度条，而不是关抽屉。
-        if (drawerOpen) {
+        // 两个抽屉（选集 / 字幕）共用这一套遮罩与层级，同一时刻只会开一个。
+        if (drawerOpen || subtitleDrawerOpen) {
             // 遮罩分两层，别把"点阴影关闭"做成一整块都能关：
             // 1) 整块压暗——纯绘制，不接任何手势；
             // 2) 只有抽屉以外的那块阴影接点击 → 点阴影才关抽屉。
@@ -986,9 +938,12 @@ fun NekoPlayer(
                         .fillMaxHeight()
                         .fillMaxWidth()
                         // 给抽屉让出右侧宽度：padding 之后的这段才是点击命中区（左侧阴影）
-                        .padding(end = EpisodeDrawerWidth)
+                        .padding(end = PlayerDrawerWidth)
                         .pointerInput(Unit) {
-                            detectTapGestures { drawerOpen = false }
+                            detectTapGestures {
+                                drawerOpen = false
+                                subtitleDrawerOpen = false
+                            }
                         },
                 )
             }
@@ -1012,6 +967,38 @@ fun NekoPlayer(
             )
         }
 
+        // ===== 字幕抽屉 =====
+        //
+        // 和选集同一套面板样式，只是列的是**文件自带的内嵌字幕轨**
+        // （内封的 MKV 里通常就有简繁两条）；想切外挂字幕得让服务端另外抽一份 VTT。
+        // 竖屏也用同一个抽屉（选集只在全屏出现，字幕没有这个限制）。
+        AnimatedVisibility(
+            visible = subtitleDrawerOpen,
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it }),
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            SubtitleDrawer(
+                tracks = subtitleTracks,
+                onDisable = {
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                    subtitleDrawerOpen = false
+                },
+                onSelect = { track ->
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        // 之前关过字幕的话这里要重新打开，否则选了轨也不显示
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(track.override)
+                        .build()
+                    subtitleDrawerOpen = false
+                },
+            )
+        }
+
         // 分辨率与缓冲/丢帧统计不再画在画面上（会跟 B 站 风格的控制栏打架），
         // 需要看的时候用 adb logcat -s NekoPlayer：每 5 秒一条 pos/dur/buffered/playing。
     }
@@ -1024,7 +1011,7 @@ fun NekoPlayer(
  * @param label 抽屉里显示的名字
  * @param selected 当前是不是正在用它
  */
-private data class SubtitleTrack(
+internal data class SubtitleTrack(
     val override: TrackSelectionOverride,
     val label: String,
     val selected: Boolean,
@@ -1160,39 +1147,6 @@ private fun applySubtitleStyle(playerView: PlayerView) {
 
     // 字幕默认贴着底边，会被控制栏压住，抬起来一点
     subtitleView.setBottomPaddingFraction(0.12f)
-}
-
-/**
- * 字幕抽屉里的一行。
- *
- * @param label 显示的名字
- * @param selected 是不是当前使用的字幕
- * @param onClick 点这一行的回调
- */
-@Composable
-private fun SubtitleOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = label,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-
-        if (selected) {
-            Text(
-                text = "使用中",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
 }
 
 /**
