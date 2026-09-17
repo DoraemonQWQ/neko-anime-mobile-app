@@ -4,8 +4,8 @@
     "baseUrl": "http://127.0.0.1:8080",
     "connectTimeoutSeconds": 10,
     "readTimeoutSeconds": 20,
-    "_comment_mockDelay": "给每个接口请求加的模拟延迟，用来肉眼确认「加载中」等状态；线上配置写 0",
-    "mockDelayMillis": 1200
+    "_comment_mockDelay": "给每个接口请求加的模拟延迟，用来肉眼确认「加载中」等状态；平时用 0，需要看骨架屏/加载态时临时调大",
+    "mockDelayMillis": 0
   },
   "home": {
     "_comment_recommend": "推荐板块：跟 Flutter 版一致用 校园/战斗/后宫，标题由 recommendTitlePrefix + 题材拼出来",
