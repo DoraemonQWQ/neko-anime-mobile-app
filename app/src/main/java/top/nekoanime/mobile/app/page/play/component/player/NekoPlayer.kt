@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.media.AudioManager
 import android.os.SystemClock
+import android.util.TypedValue
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -14,10 +15,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,8 +31,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,18 +55,24 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import top.nekoanime.mobile.app.model.entity.Episode
 import kotlinx.coroutines.delay
@@ -141,6 +153,7 @@ private const val MaxSeekFractionPerDrag = 0.5f
 // 这里用 androidx 的 @OptIn（不是 kotlin.OptIn，那个要求标记注解是 Kotlin 的 @RequiresOptIn）：
 // 它只作用于本函数，不会把这个要求传染给调用方（MainActivity / PlayerScreen 不用跟着标）。
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NekoPlayer(
     player: ExoPlayer,
@@ -184,6 +197,12 @@ fun NekoPlayer(
 
     // 全屏选集抽屉是否展开
     var drawerOpen by remember { mutableStateOf(false) }
+
+    // 字幕抽屉是否展开
+    var subtitleDrawerOpen by remember { mutableStateOf(false) }
+
+    // 视频里自带的内嵌字幕轨（字幕抽屉列的就是它）。空表示这个文件没有字幕轨，此时不显示字幕按钮
+    var subtitleTracks by remember { mutableStateOf<List<SubtitleTrack>>(emptyList()) }
 
     // 播放器里**当前真正加载**的那一集：必须和外层传进来的 episode 分开——
     // 外层一改 state，episode 立刻是新剧集，但播放器里播的还是上一集（换源是后面的 effect 才做的）。
@@ -310,9 +329,25 @@ fun NekoPlayer(
 
                 android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName} / ${error.message}", error)
             }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                // 内嵌字幕轨每次换源都会重建，跟着刷新抽屉里的列表
+                subtitleTracks = collectSubtitleTracks(tracks)
+            }
         }
 
         player.addListener(listener)
+
+        /*
+         * 字幕轨默认得有人选，否则画面干干净净一个字都没有。
+         * 中文轨在容器里的语言标记五花八门（chi / zho / zh / und），这里都列进偏好里；
+         * 完全没标语言的轨也允许被选中（不少压制组就是不写语言标记）。
+         */
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setPreferredTextLanguages("zh", "zh-Hans", "zh-Hant", "chi", "zho", "chs", "cht")
+            .setSelectUndeterminedTextLanguage(true)
+            .build()
 
         onDispose {
             // 离开播放页：把最后的位置补报一次，别丢最后几秒
@@ -435,8 +470,20 @@ fun NekoPlayer(
     //   不会出现"手指还在屏幕上，控制栏自己消失了"；
     // - 抽屉展开期间同样不隐藏。
     // - 首次加载 / 播放失败时会话被钉住（controlsPinned），根本不该起这个计时。
-    LaunchedEffect(controlsVisible, interactionTick, interactingCount, drawerOpen, controlsPinned) {
-        if (controlsVisible && !drawerOpen && interactingCount == 0 && !controlsPinned) {
+    LaunchedEffect(
+        controlsVisible,
+        interactionTick,
+        interactingCount,
+        drawerOpen,
+        subtitleDrawerOpen,
+        controlsPinned,
+    ) {
+        if (controlsVisible &&
+            !drawerOpen &&
+            !subtitleDrawerOpen &&
+            interactingCount == 0 &&
+            !controlsPinned
+        ) {
             delay(ControlsAutoHideMillis)
             controlsVisible = false
             android.util.Log.i("NekoPlayer", "控制栏 5 秒无操作，自动隐藏")
@@ -590,9 +637,15 @@ fun NekoPlayer(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    applySubtitleStyle(this)
                 }
             },
-            update = { view -> view.player = player },
+            update = { view ->
+                view.player = player
+                // PlayerView 绑播放器时会把**系统**字幕样式套回来（不少 ROM 默认是白字黑底），
+                // 绑完再设一遍自己的样式，字幕才是"白字 + 黑描边、背景透明"
+                applySubtitleStyle(view)
+            },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -856,7 +909,61 @@ fun NekoPlayer(
                 } else {
                     null
                 },
+                // 字幕按钮：文件里确实带内嵌字幕轨才显示（没有字幕的文件上摆个按钮只会让人以为坏了）
+                subtitleDrawer = if (subtitleTracks.isNotEmpty()) {
+                    { subtitleDrawerOpen = true }
+                } else {
+                    null
+                },
             )
+        }
+
+        // ===== 字幕抽屉 =====
+        //
+        // 列的是**文件自带的内嵌字幕轨**（内封的 MKV 里就有简繁两条）；
+        // 想切外挂字幕得让服务端另外抽一份 VTT，这里先不做。
+        if (subtitleDrawerOpen) {
+            ModalBottomSheet(
+                onDismissRequest = { subtitleDrawerOpen = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                Text(
+                    text = "字幕",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
+                )
+
+                // 「关闭字幕」永远排第一：没有字幕轨时也能一眼看出当前是关着的
+                SubtitleOptionRow(
+                    label = "关闭字幕",
+                    selected = subtitleTracks.none { it.selected },
+                    onClick = {
+                        player.trackSelectionParameters = player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build()
+                        subtitleDrawerOpen = false
+                    },
+                )
+
+                subtitleTracks.forEach { track ->
+                    SubtitleOptionRow(
+                        label = track.label,
+                        selected = track.selected,
+                        onClick = {
+                            player.trackSelectionParameters = player.trackSelectionParameters
+                                .buildUpon()
+                                // 之前关过字幕的话这里要重新打开，否则选了轨也不显示
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                .setOverrideForType(track.override)
+                                .build()
+                            subtitleDrawerOpen = false
+                        },
+                    )
+                }
+            }
         }
 
         // ===== 全屏选集抽屉 =====
@@ -907,6 +1014,184 @@ fun NekoPlayer(
 
         // 分辨率与缓冲/丢帧统计不再画在画面上（会跟 B 站 风格的控制栏打架），
         // 需要看的时候用 adb logcat -s NekoPlayer：每 5 秒一条 pos/dur/buffered/playing。
+    }
+}
+
+/**
+ * 视频里自带的一条内嵌字幕轨。
+ *
+ * @param override 选中这条轨要用的 override
+ * @param label 抽屉里显示的名字
+ * @param selected 当前是不是正在用它
+ */
+private data class SubtitleTrack(
+    val override: TrackSelectionOverride,
+    val label: String,
+    val selected: Boolean,
+)
+
+/**
+ * 从播放器的轨道信息里挑出内嵌字幕轨。
+ *
+ * @param tracks 播放器上报的轨道集合
+ * @returns 字幕轨列表（顺序与文件里的顺序一致）；没有字幕轨时为空
+ */
+private fun collectSubtitleTracks(tracks: Tracks): List<SubtitleTrack> {
+    val formats = mutableListOf<Format>()
+    val overrides = mutableListOf<TrackSelectionOverride>()
+    val selected = mutableListOf<Boolean>()
+
+    tracks.groups.forEach { group ->
+        if (group.type != C.TRACK_TYPE_TEXT) {
+            return@forEach
+        }
+
+        for (index in 0 until group.length) {
+            // 设备解不了的字幕格式（比如图形字幕 PGS）就别列出来了
+            if (!group.isTrackSupported(index)) {
+                continue
+            }
+
+            formats += group.getTrackFormat(index)
+            overrides += TrackSelectionOverride(group.mediaTrackGroup, index)
+            selected += group.isTrackSelected(index)
+        }
+    }
+
+    val labels = buildSubtitleLabels(formats)
+
+    return formats.indices.map { index ->
+        SubtitleTrack(
+            override = overrides[index],
+            label = labels[index],
+            selected = selected[index],
+        )
+    }
+}
+
+/**
+ * 给每条字幕轨起个能区分的名字。
+ *
+ * @description 优先用容器里写的轨道名，没有就用语言标记对应的中文名。
+ * 中文组压的内封 MKV 常常两条轨**都没名字**、language 又都是 chi（简繁两条），
+ * 这时按通行惯例当作「第 1 条简体、第 2 条繁体」——猜错也只是名字不准，
+ * 点一下就能切到另一条，比两条都叫「中文」强。
+ *
+ * @param formats 字幕轨的格式信息
+ * @returns 与 formats 一一对应的名字
+ */
+private fun buildSubtitleLabels(formats: List<Format>): List<String> {
+    val base = formats.map { format ->
+        format.label?.takeIf { it.isNotBlank() } ?: languageDisplayName(format.language)
+    }
+
+    val duplicated = base.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+
+    if (duplicated.isEmpty()) {
+        return base
+    }
+
+    if (formats.size == 2 && formats.all { isChineseLanguage(it.language) }) {
+        return listOf("简体中文", "繁体中文")
+    }
+
+    // 其它情况按出现顺序编号，别让抽屉里出现两个一模一样的名字
+    val seen = mutableMapOf<String, Int>()
+
+    return base.map { name ->
+        val order = (seen[name] ?: 0) + 1
+        seen[name] = order
+        if (name in duplicated) "$name $order" else name
+    }
+}
+
+/**
+ * 这条字幕轨是不是中文（各组的语言标记写法不一样，能认的都认上）。
+ *
+ * @param language 容器里的语言标记
+ * @returns 是中文返回 true
+ */
+private fun isChineseLanguage(language: String?): Boolean = when (language?.lowercase()) {
+    "chi", "zho", "zh", "zh-hans", "zh-hant", "chs", "cht", "chi-hans", "chi-hant" -> true
+    else -> false
+}
+
+/**
+ * 语言标记 → 中文名。
+ *
+ * @param language 容器里的语言标记
+ * @returns 可读的名字
+ */
+private fun languageDisplayName(language: String?): String = when (language?.lowercase()) {
+    null, "", "und" -> "未标记语言"
+    "chi", "zho", "zh" -> "中文"
+    "zh-hans", "chs", "chi-hans" -> "简体中文"
+    "zh-hant", "cht", "chi-hant" -> "繁体中文"
+    "jpn", "ja" -> "日语"
+    "eng", "en" -> "英语"
+    else -> language ?: "未知"
+}
+
+/**
+ * 字幕样式：白字 + 黑色描边、**背景透明**。
+ *
+ * @description PlayerView 默认套用系统字幕样式，而多数 ROM 的系统样式是「黑底白字」，
+ * 每条字幕背后就拖着一条黑条。这里显式覆盖掉：背景透明、靠描边保证任何画面上都看得清。
+ *
+ * @param playerView 播放器视图
+ */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+private fun applySubtitleStyle(playerView: PlayerView) {
+    val subtitleView = playerView.subtitleView ?: return
+
+    subtitleView.setStyle(
+        CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
+
+    // 默认字号在手机上偏小，横屏更看不清
+    subtitleView.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+
+    // 字幕默认贴着底边，会被控制栏压住，抬起来一点
+    subtitleView.setBottomPaddingFraction(0.12f)
+}
+
+/**
+ * 字幕抽屉里的一行。
+ *
+ * @param label 显示的名字
+ * @param selected 是不是当前使用的字幕
+ * @param onClick 点这一行的回调
+ */
+@Composable
+private fun SubtitleOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        if (selected) {
+            Text(
+                text = "使用中",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
