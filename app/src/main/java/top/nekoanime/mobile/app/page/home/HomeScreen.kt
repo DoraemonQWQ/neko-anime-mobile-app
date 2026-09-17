@@ -262,16 +262,21 @@ private fun HomeTabContent(
     var loading by rememberSaveable { mutableStateOf(true) }
     var failed by rememberSaveable { mutableStateOf(false) }
     var reloadKey by rememberSaveable { mutableIntStateOf(0) }
+    // 已经处理过的刷新计数：判断"这次进入是不是返回"要看它，而不是看 reloadKey 是否为 0
+    // （手动下拉刷新会把 reloadKey 顶到 1、2…，只看 0 的话刷过一次就永远判定成"新进入"）
+    var handledReloadKey by rememberSaveable { mutableIntStateOf(0) }
     var loadedOnce by rememberSaveable { mutableStateOf(false) }
     // 下拉刷新的转圈只在这里为 true：不能用 loading 推导，
     // 否则首次加载时「数据一部分已经到了」会让刷新指示器突然冒出来（看起来像自己下拉了一下）
     var refreshing by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
+        val currentKey = reloadKey
+
         // 从二级页返回（已有数据、也不是手动刷新）：
         // 轮播与题材推荐直接用缓存不重拉，但「继续观看」必须刷新一下——
         // 用户刚看完一集回来，那一行要反映最新进度。
-        if (loadedOnce && reloadKey == 0) {
+        if (loadedOnce && currentKey == handledReloadKey) {
             continueWatching.clear()
             continueWatching.addAll(
                 UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
@@ -309,6 +314,7 @@ private fun HomeTabContent(
         failed = hotResult.isFailure && rows.isEmpty()
         loading = false
         loadedOnce = true
+        handledReloadKey = currentKey
         refreshing = false
     }
 
