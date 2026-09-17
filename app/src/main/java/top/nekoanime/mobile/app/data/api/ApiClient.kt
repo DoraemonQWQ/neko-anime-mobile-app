@@ -223,11 +223,15 @@ private val http = OkHttpClient.Builder()
                 .build()
 
             noRedirectHttp.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
+                // 注意：这里要的就是 301/302 的 Location，不能用 isSuccessful 判断（那只认 200-299，
+                // 会把正常跳转当成"请求失败 302"）。只有拿不到 Location 才是真失败（例如 401 未登录）。
+                val location = response.header("Location")
+
+                if (location.isNullOrBlank()) {
                     error(failureMessage(path, response.code, response.body?.string().orEmpty()))
                 }
 
-                response.header("Location") ?: error("后端没有返回跳转地址")
+                location
             }
         }
     }
