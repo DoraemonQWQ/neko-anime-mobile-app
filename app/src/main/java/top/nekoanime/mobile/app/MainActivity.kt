@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
     /** 是否全屏（播放页用） */
     private var fullscreen by mutableStateOf(false)
 
-    /** 当前是否在播放页（系统栏图标的明暗要看它） */
+    /** 当前是否在播放页（系统栏图标明暗要看它；更新弹窗也要避开这一页） */
     private var onPlayPage by mutableStateOf(false)
 
     /** 当前是否在首页（主动提示只在这一页弹；强制更新不看它） */
@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
      *
      * @description 两个来源：启动页初始化阶段查到的（见 {@link SplashScreen}）、
      * 以及 App 从后台回到前台时补查到的。结果先存在这里：
-     * 强制更新立刻弹，主动提示等回到首页再弹。
+     * 离开播放页后，强制更新立刻弹、主动提示等回到首页再弹。
      */
     private var pendingUpdate by mutableStateOf<AppUpdateDto?>(null)
 
@@ -179,12 +179,13 @@ class MainActivity : ComponentActivity() {
 
                 /*
                  * 待提示的版本怎么弹：
-                 * - **强制更新**：不管在哪个页面、有没有勾过「不再提示」，直接弹；
+                 * - **播放页一律不弹**：用户正在看视频，弹什么更新都不合适；查到的先挂着，离开播放页再弹；
+                 * - **强制更新**：除播放页外的任何页面，且不管有没有勾过「不再提示」，直接弹；
                  * - **主动提示**：只在首页弹（启动页查到的等进首页、回前台查到的等回到首页）。
                  */
                 val update = pendingUpdate
 
-                if (update != null && (update.force || onHomePage)) {
+                if (update != null && !onPlayPage && (update.force || onHomePage)) {
                     UpdateDialog(
                         info = update,
                         onDismiss = { pendingUpdate = null },
@@ -232,7 +233,7 @@ class MainActivity : ComponentActivity() {
      * 判断检查到的版本要不要挂成待提示。
      *
      * @description 规则只有一条：强制更新无条件提示；主动提示要用户没勾过「7 天内不再提示」。
-     * 至于"当前在不在首页"，是弹窗的时候才看（见 setContent 里的判断）。
+     * 至于"当前在不在首页 / 播放页"，是弹窗的时候才看（见 setContent 里的判断）。
      *
      * @param info 检查更新返回的版本信息；null 表示已是最新
      */
