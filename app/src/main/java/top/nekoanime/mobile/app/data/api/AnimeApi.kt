@@ -65,6 +65,8 @@ object AnimeApi {
         type: String,
         source: String,
         category: String,
+        sort: String = "date",
+        order: String = "desc",
     ): Result<PageDataDto<AnimeBasicDto>> = ApiClient.get(
         path = ApiRoutes.ANIME_LIST,
         query = mapOf(
@@ -75,6 +77,8 @@ object AnimeApi {
             "type" to type,
             "source" to source,
             "category" to category,
+            "sort" to sort,
+            "order" to order,
         ),
         serializer = PageDataDto.serializer(AnimeBasicDto.serializer()),
     )

@@ -405,6 +405,10 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
     var source by rememberSaveable { mutableStateOf("all") }
     var category by rememberSaveable { mutableStateOf("all") }
 
+    // 排序：默认按放映日期倒序；换排序字段时方向复位成该字段的自然顺序（名称 A→Z，其余从新/从高）
+    var sort by rememberSaveable { mutableStateOf("date") }
+    var order by rememberSaveable { mutableStateOf("desc") }
+
     /** 加载下一页（正在加载或没有下一页时直接返回） */
     suspend fun loadNextPage() {
         if (loading || !hasMore) {
@@ -422,6 +426,8 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
             type = type,
             source = source,
             category = category,
+            sort = sort,
+            order = order,
         )
             .onSuccess { paged ->
                 // 去重追加：服务端按评分排序存在并列，翻页边界可能重复返回同一条；
@@ -438,7 +444,7 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
 
     // 首次进入 + 筛选变化 + 下拉刷新：清空重新拉第一页；
     // 从二级页返回时（列表还在、条件没变）直接复用，不再请求
-    LaunchedEffect(year, month, type, source, category, refreshKey) {
+    LaunchedEffect(year, month, type, source, category, sort, order, refreshKey) {
         if (items.isNotEmpty() && refreshKey == handledRefreshKey) {
             return@LaunchedEffect
         }
@@ -501,6 +507,22 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
                 options = AnimeFilterOptions.category,
                 value = category,
                 onSelect = { category = it },
+            )
+            FilterSelector(
+                label = "排序",
+                options = AnimeFilterOptions.sort,
+                value = sort,
+                onSelect = { picked ->
+                    sort = picked
+                    // 换字段顺手把方向设成该字段的自然顺序，免得出现"名称 Z→A"这种别扭默认
+                    order = if (picked == "name") "asc" else "desc"
+                },
+            )
+            FilterSelector(
+                label = "方向",
+                options = AnimeFilterOptions.order,
+                value = order,
+                onSelect = { order = it },
             )
         }
 
