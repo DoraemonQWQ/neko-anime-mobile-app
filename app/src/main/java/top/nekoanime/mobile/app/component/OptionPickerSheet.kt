@@ -1,10 +1,14 @@
 package top.nekoanime.mobile.app.component
 
+import android.view.Window
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -28,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,15 +42,17 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -66,6 +73,9 @@ private val PickerPanelHeight = PickerViewportHeight + 96.dp
 
 /** 出场动画时长：跟入场保持一致，滑下去再移除浮层，不然是"啪"一下消失 */
 private const val PickerExitMillis = 240L
+
+/** 背景遮罩浓度：太深显得压抑，太浅又压不住底下的内容 */
+private const val PickerScrimAlpha = 0.42f
 
 /**
  * 每一项相对中心的放大档位。
@@ -168,29 +178,74 @@ fun OptionPickerSheet(
             }
     }
 
-    Popup(
-        // focusable：能拿到返回键（Popup 的 onDismissRequest 就是返回键），也能独占触摸
-        properties = PopupProperties(focusable = true),
+    /*
+     * 用 Dialog 而不是 Popup：Popup 的窗口在状态栏下面，阴影铺不到顶部安全区
+     * （上一版就是这么被看出来的）。Dialog 关掉系统栏内缩与默认宽度限制后，
+     * 内容是一整屏，阴影就能盖住包括状态栏在内的全部区域。
+     * 点外部关闭由我们自己那层阴影接管，所以 dismissOnClickOutside 关掉；
+     * 返回键仍然交给 onDismissRequest（走同一条关闭动画）。
+     */
+    Dialog(
         onDismissRequest = { requestClose() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+            dismissOnClickOutside = false,
+        ),
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // 阴影：点它就关（只有这一层接点击，点别处不会穿透到底下的列表）
-            AnimatedVisibility(
-                visible = shown && !closing,
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.32f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { requestClose() },
-                        ),
+        val dialogView = LocalView.current
+        var dialogWindow by remember { mutableStateOf<Window?>(null) }
+
+        /*
+         * 阴影交给系统 Dialog 自带的那层遮罩来压暗（它连状态栏那条安全区也能盖到），
+         * 我们自己那层只负责接点击，不再自己涂黑——两套一起上会在状态栏边界处
+         * 留下一道明暗分界线（顶上一块浅、下面一块深），看着像没盖住顶部。
+         * 窗口本身仍然撑满整屏，这样安全区里点一下也能关掉面板。
+         */
+        SideEffect {
+            val window = (dialogView as? DialogWindowProvider)?.window
+                ?: (dialogView.parent as? DialogWindowProvider)?.window
+
+            // 只在刚拿到窗口的那一次配置它：后面每次重组都重置遮罩浓度会跟淡入淡出打架
+            if (window != null && dialogWindow !== window) {
+                window.setDimAmount(0f)
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+                window.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
                 )
+
+                dialogWindow = window
             }
+        }
+
+        // 遮罩淡入淡出：和面板的滑动动画同步，出场也是滑下去的同时慢慢变亮
+        LaunchedEffect(dialogWindow, shown, closing) {
+            val window = dialogWindow ?: return@LaunchedEffect
+            val target = if (shown && !closing) PickerScrimAlpha else 0f
+            val start = window.attributes.dimAmount
+
+            if (start != target) {
+                animate(
+                    initialValue = start,
+                    targetValue = target,
+                    animationSpec = tween(durationMillis = PickerExitMillis.toInt()),
+                ) { value, _ -> window.setDimAmount(value) }
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 点面板外面就关：这一层是透明的，压暗效果由上面那层系统遮罩负责
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { requestClose() },
+                    ),
+            )
 
             AnimatedVisibility(
                 visible = shown && !closing,
