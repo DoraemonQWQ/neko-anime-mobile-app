@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -45,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import top.nekoanime.mobile.app.config.AnimeFilterOption
 
@@ -60,6 +63,9 @@ private val PickerViewportHeight = PickerRowHeight * PickerVisibleRows
 
 /** 面板高度：标题 + 滚轮 + 上下留白 */
 private val PickerPanelHeight = PickerViewportHeight + 96.dp
+
+/** 出场动画时长：跟入场保持一致，滑下去再移除浮层，不然是"啪"一下消失 */
+private const val PickerExitMillis = 240L
 
 /**
  * 每一项相对中心的放大档位。
@@ -81,7 +87,8 @@ private fun scaleForDistance(distance: Float): Float = (1f - 0.17f * distance).c
  * 自己画就完全可控：
  * - **中间高亮带固定不动**，动的只有列表，滚到中间的那一项就是当前项（最大、主色）；
  * - 松手吸附到最近一行，中间永远正好压着一整项；
- * - 关闭方式：点某一项（选中并关闭）、点面板外的阴影、系统返回键；
+ * - **点某一项分两步**：点在非中间项上只把它滚到中间（不生效），再点中间那一项才真正选中并关闭；
+ * - 关闭方式：点中间那一项（选中并关闭）、点面板外的阴影、系统返回键，都会走一次下滑动画；
  * - 面板本身**不可拖拽**，只有滚轮能上下滑，不会误触把面板拖走。
  *
  * @param title 面板标题（一般是筛选项名字）
@@ -103,12 +110,28 @@ fun OptionPickerSheet(
     val rowHeightPx = with(density) { PickerRowHeight.toPx() }
     val selectedIndex = options.indexOfFirst { it.value == value }
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val scope = rememberCoroutineScope()
 
-    // 入场动画：先渲染在屏幕外，下一帧再滑进来
+    // 入场 / 出场动画：先渲染在屏幕外，下一帧再滑进来；关闭时先滑下去、动画放完才移除浮层
     var shown by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         shown = true
+    }
+
+    LaunchedEffect(closing) {
+        if (closing) {
+            delay(PickerExitMillis)
+            onDismiss()
+        }
+    }
+
+    /** 关闭面板（带动画）：真正移除交给上面的 LaunchedEffect */
+    fun requestClose() {
+        if (!closing) {
+            closing = true
+        }
     }
 
     // 打开时把当前项滚到正中：可视区 5 行，第 3 行是正中，所以上边留 2 行的高度
@@ -148,23 +171,29 @@ fun OptionPickerSheet(
     Popup(
         // focusable：能拿到返回键（Popup 的 onDismissRequest 就是返回键），也能独占触摸
         properties = PopupProperties(focusable = true),
-        onDismissRequest = onDismiss,
+        onDismissRequest = { requestClose() },
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // 阴影：点它就关（只有这一层接点击，点别处不会穿透到底下的列表）
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.32f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDismiss,
-                    ),
-            )
+            AnimatedVisibility(
+                visible = shown && !closing,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.32f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { requestClose() },
+                        ),
+                )
+            }
 
             AnimatedVisibility(
-                visible = shown,
+                visible = shown && !closing,
                 enter = slideInVertically(initialOffsetY = { height -> height }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { height -> height }) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -229,8 +258,20 @@ fun OptionPickerSheet(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
                                             onClick = {
-                                                onSelect(option.value)
-                                                onDismiss()
+                                                /*
+                                                 * 分两步，避免手滑误选：
+                                                 * 1. 点的是**已经居中**的那一项 → 就是它了，选中并关闭；
+                                                 * 2. 点的是别的项 → 只把它滚到中间（不生效），
+                                                 *    用户看清楚之后再点一次中间那项才真正选中。
+                                                 */
+                                                if (centered) {
+                                                    onSelect(option.value)
+                                                    requestClose()
+                                                } else {
+                                                    scope.launch {
+                                                        listState.animateScrollToItem(index)
+                                                    }
+                                                }
                                             },
                                         ),
                                     contentAlignment = Alignment.Center,
