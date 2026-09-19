@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -113,7 +114,13 @@ fun OptionPickerSheet(
     // 打开时把当前项滚到正中：可视区 5 行，第 3 行是正中，所以上边留 2 行的高度
     LaunchedEffect(selectedIndex, options) {
         if (selectedIndex >= 0) {
-            listState.scrollToItem(selectedIndex, -(((PickerVisibleRows - 1) / 2) * rowHeightPx).toInt())
+            /*
+             * 注意这里**不带偏移**：滚轮上下各加了半屏（(可视区高 - 行高) / 2）的留白，
+             * 所以把某一项滚到内容起点，它自然就落在正中。
+             * 这份留白是必须的——没有它，第一项最多只能贴顶显示，
+             * 而中间的高亮带是固定的，就会出现"看着选中第三个、其实值是第一个"。
+             */
+            listState.scrollToItem(selectedIndex)
         }
     }
 
@@ -198,6 +205,8 @@ fun OptionPickerSheet(
 
                         LazyColumn(
                             state = listState,
+                            // 上下各留半屏：第一项/最后一项也能滚到正中
+                            contentPadding = PaddingValues(vertical = (PickerViewportHeight - PickerRowHeight) / 2),
                             modifier = Modifier.fillMaxSize(),
                         ) {
                             itemsIndexed(options) { index, option ->
