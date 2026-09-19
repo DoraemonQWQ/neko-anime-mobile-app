@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -89,8 +90,13 @@ data class HomeRecommendRow(val title: String, val animes: List<AnimeBrief>)
 /** 板块之间的间隔（Flutter 版用 10dp） */
 private val SectionSpacing = 10.dp
 
-/** 底部 Tab 内容高度（Flutter 的 kBottomNavigationBarHeight = 56） */
-private val BottomBarContentHeight = 56.dp
+/**
+ * 底部 Tab 内容高度。
+ *
+ * @description 采用 iOS 标签栏的 49pt 标准高度（不含底部安全区）；
+ * 比原来的 56 矮一点，图标 + 文字两行也放得下。
+ */
+private val BottomBarContentHeight = 49.dp
 
 /** 筛选栏高度（Flutter 版用的是 kToolbarHeight = 56） */
 private val FilterBarHeight = 56.dp
@@ -155,14 +161,27 @@ fun HomeScreen(
             )
         },
         bottomBar = {
-            // 底部栏：内容高 56dp（跟 Flutter 的 kBottomNavigationBarHeight 一致）。
-            // 导航栏留白加在**外面**——否则 56 里还要塞进系统导航栏的高度，图标会被压扁。
+            /*
+             * iOS 风格标签栏：
+             * 1. 半透明底 + 顶部一条 0.5dp 发丝分割线（iOS 的 hairline separator）；
+             *    Compose 没有"背景模糊"，做不了真·毛玻璃，用半透明把观感做近似；
+             * 2. 图标在上、文字在下（iOS 标签栏一直显示文字，不像 M3 只有图标）；
+             * 3. 选中项用主题主色，未选中用中性灰，没有胶囊指示器；
+             * 4. 高度 49dp（iOS 标准），底部安全区留白加在**外面**，免得把内容挤扁。
+             */
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
                     .navigationBarsPadding(),
             ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
+                )
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -170,7 +189,14 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     HomeTab.entries.forEach { item ->
-                        Box(
+                        val selected = selectedTab == item
+                        val tint = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        }
+
+                        Column(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
@@ -179,33 +205,25 @@ fun HomeScreen(
                                     indication = null,
                                     onClick = { onTabChange(item) },
                                 ),
-                            contentAlignment = Alignment.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                         ) {
-                            // 选中态：一个小胶囊（跟 M3 / Flutter 的 indicator 一致）
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 64.dp, height = 32.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        if (selectedTab == item) {
-                                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
-                                        } else {
-                                            Color.Transparent
-                                        },
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = item.iconRes),
-                                    contentDescription = item.label,
-                                    tint = if (selectedTab == item) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
+                            Icon(
+                                painter = painterResource(id = item.iconRes),
+                                contentDescription = item.label,
+                                tint = tint,
+                                modifier = Modifier.size(25.dp),
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Text(
+                                text = item.label,
+                                color = tint,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                lineHeight = 12.sp,
+                            )
                         }
                     }
                 }
