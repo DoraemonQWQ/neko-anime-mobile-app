@@ -44,13 +44,13 @@ android {
         /*
          * 发布版本号：只在确认发版时动。
          *
-         * @description 上一次发出去的是 1.2.21，之后 dev 期又涨到过 1.2.31——那些号
-         * 都是开发期的临时号，正式发版从 1.3.0 起算（这一轮确实加了接口和页面）。
+         * @description 1.3.0 之后 dev 期的号都只挂在 versionNameSuffix（`-dev.<构建号>`）上，
+         * 本次正式发版带上了播放页追番功能，所以发布版本从 1.3.0 走到 1.4.0。
          * versionCode 跟着版本号推导（跟后端 AppReleaseService.BuildVersionCode 同一套公式：
          * 主 * 1000000 + 次 * 10000 + 补丁 * 100 + 构建号），保证单调递增、能被安卓正常覆盖安装。
          */
-        versionCode = 1_030_000
-        versionName = "1.3.0"
+        versionCode = 1_040_000
+        versionName = "1.4.0"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")
