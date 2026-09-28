@@ -13,8 +13,8 @@
 
 | 位置 | 提交 / 版本 | 说明 |
 | --- | --- | --- |
-| `dev` | `5214a1c`（1.4.0 发版）+ 本文档提交 | 日常开发分支，与 `origin/dev` 同步 |
-| `main` | `8b9ec36` | 已 `--no-ff` 合入 dev（用户放行后合并），与 `origin/main` 同步 |
+| `dev` | 与 `origin/dev` 同步 | 日常开发分支；最新提交以 `git log -1 dev` 为准 |
+| `main` | 与 `origin/main` 同步 | 发布分支，已 `--no-ff` 合入 1.4.0 发版与文档更新；最新提交以 `git log -1 main` 为准 |
 | 线上更新通道 | `1.4.0` / versionCode `1040000` | `mobile_app/NekoAnime-1.4.0.apk`，14840986 字节，md5 `0b68eb5b8cb3ab88df84bbb8fb73ac8b` |
 
 ## 刚做完（2026-09-28 这一轮）
