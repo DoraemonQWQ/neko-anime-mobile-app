@@ -89,9 +89,9 @@ private val PlayerBackdropColor = Color.Black
  * @param onOpenAnime 点推荐卡片（参数是番剧 id）
  * @param startEpisodeId 从历史记录/继续观看进来时指定的剧集 id；为 null 表示"直接点卡片进来的"
  * @param startPositionMs 与 startEpisodeId 配套的播放位置（毫秒）
- * @param loggedIn 是否已登录（决定追番按钮能不能点；移动端登录还没做，默认 false）
- * @param subscribed 是否已追番（正式版由后端给）
- * @param onToggleSubscribe 点追番 / 取消追番
+ * @param loggedIn 是否已登录（决定追番按钮能不能点）
+ * @param subscribed 是否已追番（由 PlayRoute 从后端取；未登录时固定 false）
+ * @param onToggleSubscribe 点追番 / 取消追番（成功后状态由上层更新）
  */
 @Composable
 fun PlayScreen(

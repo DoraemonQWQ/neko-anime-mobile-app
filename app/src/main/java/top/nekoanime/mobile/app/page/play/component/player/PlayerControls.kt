@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Fullscreen
@@ -112,6 +113,7 @@ private val NoInsets = WindowInsets(0, 0, 0, 0)
  * @param onHome 返回主页
  * @param modifier 由播放器给出的布局约束（一般是整块播放区域）
  * @param episodeDrawer 打开选集抽屉；为 null 表示当前不显示选集按钮（非全屏时不显示，选集列表就在播放器下面）
+ * @param subtitleDrawer 打开字幕抽屉；为 null 表示当前文件没有内嵌字幕轨，不显示字幕按钮
  * @param previousEpisode 上一集；为 null 就整块隐藏（非全屏不显示，或者已经是第一集）
  * @param nextEpisode 下一集；为 null 就整块隐藏（非全屏不显示，或者已经是最后一集）
  * @param onUserInteraction 点控制栏上的按钮（一次性操作）：控制栏自动隐藏重新计时
@@ -143,6 +145,7 @@ fun PlayerControls(
     // modifier 放在所有"有默认值的参数"最前面：Compose 的约定（lint 的 ModifierParameter 检查）
     modifier: Modifier = Modifier,
     episodeDrawer: (() -> Unit)? = null,
+    subtitleDrawer: (() -> Unit)? = null,
     previousEpisode: (() -> Unit)? = null,
     nextEpisode: (() -> Unit)? = null,
     onUserInteraction: () -> Unit = {},
@@ -432,6 +435,24 @@ fun PlayerControls(
                                     fontSize = ControlTextSize,
                                     fontWeight = FontWeight.Medium,
                                 )
+                            }
+
+                            // 字幕：文件带内嵌字幕轨时才出现，点开是底部弹出的小抽屉
+                            if (subtitleDrawer != null) {
+                                IconButton(
+                                    onClick = {
+                                        onUserInteraction()
+                                        subtitleDrawer()
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Subtitles,
+                                        contentDescription = "字幕",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(ControlIconSize),
+                                    )
+                                }
                             }
 
                             // 选集：只在全屏出现，点开是从右侧滑出的抽屉

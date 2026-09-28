@@ -68,8 +68,8 @@ import top.nekoanime.mobile.app.model.entity.AnimeBrief
  *
  * @param onOpenAnime 点搜索结果（进播放页）
  * @param onBack 返回首页
- * @param initialKeyword 上次用的关键字（外层保存），空串表示还没搜过
- * @param onKeywordChange 关键字变化时同步给外层，返回本页时可以接着用
+ * @param initialKeyword 进入本页时的关键字；空串表示"待搜索"（离开搜索页时外层会把它清空）
+ * @param onKeywordChange 关键字变化时同步给外层（外层只在本页存活期间保留）
  */
 @Composable
 fun SearchScreen(
@@ -83,13 +83,14 @@ fun SearchScreen(
     var keyword by rememberSaveable { mutableStateOf(initialKeyword) }
     var submittedKeyword by rememberSaveable { mutableStateOf(initialKeyword.trim()) }
 
-    // 搜索结果与分页状态都保存：进播放页再返回时结果还在，不会重新搜一遍
+    // 结果与分页状态在本页存活期间保留（转屏、被系统回收再恢复时不至于丢）；
+    // 离开搜索页时外层会把整页重置，所以下次进来一定是"待搜索"（见 MainActivity.searchResetToken）
     val results = rememberSaveableList<AnimeBrief>("search_results")
     var page by rememberSaveable { mutableIntStateOf(0) }
     var loading by rememberSaveable { mutableStateOf(false) }
     var hasMore by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    // 带着上次的关键字回来时直接算"搜过了"
+    // 带了关键字进来（外层没清空的那条路径）就直接算"搜过了"
     var searched by rememberSaveable { mutableStateOf(initialKeyword.isNotBlank()) }
     // 上一次已经搜过的关键字：返回本页时如果没变过就直接用已有结果
     var loadedKeyword by rememberSaveable { mutableStateOf("") }
@@ -162,7 +163,7 @@ fun SearchScreen(
             }
     }
 
-    // 进页面聚焦搜索框；带着关键字回来时不弹键盘（用户是回来看结果的，不是来输入的）
+    // 进页面聚焦搜索框（"待搜索"状态要把键盘直接顶出来）；带了关键字时不弹键盘
     LaunchedEffect(Unit) {
         if (initialKeyword.isBlank()) {
             focusRequester.requestFocus()

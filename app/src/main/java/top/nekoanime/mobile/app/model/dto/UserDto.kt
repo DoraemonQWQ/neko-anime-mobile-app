@@ -61,3 +61,21 @@ data class AvatarCommitBody(val key: String)
  */
 @Serializable
 data class UpdateNicknameBody(val nickname: String)
+
+/**
+ * 追番状态（对应后端 `UserAnimeSubscriptionStatusResponse`）。
+ *
+ * @param isSubscribed 是否已追番
+ */
+@Serializable
+data class AnimeSubscriptionDto(
+    @SerialName("is_subscribed") val isSubscribed: Boolean = false,
+)
+
+/**
+ * 修改追番状态的请求体（对应后端 `UserUpdateAnimeSubscriptionStatusRequest`）。
+ *
+ * @param status 目标状态：true = 追番，false = 取消追番
+ */
+@Serializable
+data class AnimeSubscriptionBody(val status: Boolean)

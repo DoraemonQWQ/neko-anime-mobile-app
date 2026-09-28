@@ -15,6 +15,19 @@ data class AnimeFilterOption(val label: String, val value: String)
  * year / month / type / source / category 五个参数，值就是这里的 value。
  */
 object AnimeFilterOptions {
+    /** 排序字段（对应后端 sort 参数）：默认放映日期 */
+    val sort: List<AnimeFilterOption> = listOf(
+        AnimeFilterOption("放映日期", "date"),
+        AnimeFilterOption("评分", "rating"),
+        AnimeFilterOption("名称", "name"),
+    )
+
+    /** 排序方向（对应后端 order 参数）：默认倒序（从新到旧 / 从高到低） */
+    val order: List<AnimeFilterOption> = listOf(
+        AnimeFilterOption("倒序", "desc"),
+        AnimeFilterOption("顺序", "asc"),
+    )
+
     /** 年份 */
     val year: List<AnimeFilterOption> = listOf(
         AnimeFilterOption("全部", "all"),

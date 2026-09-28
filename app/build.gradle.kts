@@ -11,6 +11,21 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseKeystore = keystoreProperties.getProperty("storeFile") != null
 
+/*
+ * dev / test 包的构建号。
+ *
+ * @description 直接取当前提交数，所以**不需要**每次改一点就手改版本号：
+ * - `versionName` 那三段是**发布版本**，只有确认发版时才动；
+ * - dev 期只在后面挂 `-dev.<构建号>`，既能一眼看出手机上装的是哪一次构建，
+ *   也不会把发布版本号白白用掉（之前每个小改动都 +0.0.1，结果线上还是 1.2.21、
+ *   仓库里已经写到 1.2.31 了）。
+ * 取不到 git（比如在没有 git 的环境里打包）就退化成 0，不影响出包。
+ */
+val devBuildNumber: Int = runCatching {
+    providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+        .standardOutput.asText.get().trim().toInt()
+}.getOrDefault(0)
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -26,8 +41,16 @@ android {
         applicationId = "top.nekoanime.mobile.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 25
-        versionName = "1.2.17"
+        /*
+         * 发布版本号：只在确认发版时动。
+         *
+         * @description 1.3.0 之后 dev 期的号都只挂在 versionNameSuffix（`-dev.<构建号>`）上，
+         * 本次正式发版带上了播放页追番功能，所以发布版本从 1.3.0 走到 1.4.0。
+         * versionCode 跟着版本号推导（跟后端 AppReleaseService.BuildVersionCode 同一套公式：
+         * 主 * 1000000 + 次 * 10000 + 补丁 * 100 + 构建号），保证单调递增、能被安卓正常覆盖安装。
+         */
+        versionCode = 1_040_000
+        versionName = "1.4.0"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")
@@ -66,7 +89,7 @@ android {
              * 3. 名称与图标在 app/src/debug/res 里覆盖（Neko Anime Dev + 带 DEV 角标的图标）。
              */
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-dev"
+            versionNameSuffix = "-dev.$devBuildNumber"
         }
 
         release {
@@ -90,7 +113,7 @@ android {
         create("beta") {
             initWith(getByName("release"))
             applicationIdSuffix = ".test"
-            versionNameSuffix = "-test"
+            versionNameSuffix = "-test.$devBuildNumber"
             signingConfig = signingConfigs.getByName("testKey")
         }
     }

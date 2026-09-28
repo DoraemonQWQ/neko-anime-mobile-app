@@ -68,8 +68,10 @@ object AnimeRepository {
         type: String = "all",
         source: String = "all",
         category: String = "all",
+        sort: String = "date",
+        order: String = "desc",
     ): Result<PagedAnime> =
-        AnimeApi.list(page, limit, year, month, type, source, category).map { dto ->
+        AnimeApi.list(page, limit, year, month, type, source, category, sort, order).map { dto ->
             PagedAnime(
                 items = dto.data.map { it.toBrief() },
                 page = dto.page,

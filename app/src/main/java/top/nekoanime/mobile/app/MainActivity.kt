@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -98,8 +99,25 @@ class MainActivity : ComponentActivity() {
      */
     private var homeTab by mutableStateOf(HomeTab.Home)
 
-    /** 搜索页上次用的关键字：返回搜索页时接着用，避免回到空白页 */
+    /**
+     * 搜索页的关键字。
+     *
+     * @description 只在这一页存活期间有意义：**离开搜索页就清空**，
+     * 下次进来是干干净净的"待搜索"（见 [searchResetToken]）。
+     */
     private var searchKeyword by mutableStateOf("")
+
+    /**
+     * 搜索页的重置计数。
+     *
+     * @description 搜索页的结果与输入框是 rememberSaveable 存着的，返回这一页时会被恢复；
+     * 离开搜索页时把它 +1，回来时 composable 的 key 变了 → 整页状态重建，
+     * 保证「每次进搜索都是待搜索」。纯数字，不参与界面渲染之外的事情。
+     */
+    private var searchResetToken by mutableStateOf(0)
+
+    /** 上一次路由是不是搜索页（只在路由变化时用来判断"刚离开搜索页"） */
+    private var wasOnSearchPage = false
 
     /** 是否已经按过一次返回键（用于「再按一次退出应用」） */
     private var exitPending by mutableStateOf(false)
@@ -127,6 +145,15 @@ class MainActivity : ComponentActivity() {
 
                 // 路由变化时同步「当前是不是播放页 / 首页」，并重算系统栏图标明暗
                 LaunchedEffect(entry) {
+                    val onSearchPage = entry.isRoute<SearchRoute>()
+
+                    // 刚离开搜索页：把关键字与整页状态一起丢掉，下次进来重新开始
+                    if (wasOnSearchPage && !onSearchPage) {
+                        searchKeyword = ""
+                        searchResetToken += 1
+                    }
+
+                    wasOnSearchPage = onSearchPage
                     onPlayPage = entry.isRoute<PlayRoute>()
                     onHomePage = entry.isRoute<HomeRoute>()
                     applySystemBarAppearance()
@@ -174,6 +201,7 @@ class MainActivity : ComponentActivity() {
                     homeTab = homeTab,
                     onHomeTabChange = { homeTab = it },
                     searchKeyword = searchKeyword,
+                    searchResetToken = searchResetToken,
                     onSearchKeywordChange = { searchKeyword = it },
                 )
 
@@ -328,6 +356,7 @@ private inline fun <reified T : Any> NavBackStackEntry?.isRoute(): Boolean =
  * @param homeTab 首页选中的 Tab
  * @param onHomeTabChange 切换首页 Tab
  * @param searchKeyword 搜索页关键字
+ * @param searchResetToken 搜索页重置计数：值一变，搜索页整页状态重建（离开搜索页时 +1）
  * @param onSearchKeywordChange 搜索关键字变化回调
  */
 @Composable
@@ -339,6 +368,7 @@ private fun AppNavHost(
     homeTab: HomeTab,
     onHomeTabChange: (HomeTab) -> Unit,
     searchKeyword: String,
+    searchResetToken: Int,
     onSearchKeywordChange: (String) -> Unit,
 ) {
     NavHost(
@@ -375,12 +405,19 @@ private fun AppNavHost(
         }
 
         composable<SearchRoute> {
-            SearchScreen(
-                onOpenAnime = { animeId -> navController.navigate(PlayRoute(animeId = animeId)) },
-                onBack = { navController.popBackStack() },
-                initialKeyword = searchKeyword,
-                onKeywordChange = onSearchKeywordChange,
-            )
+            /*
+             * 用 key 把整页状态挂在"重置计数"上：离开搜索页时计数 +1，
+             * 下次进来 key 变了，SearchScreen 里那些 rememberSaveable（输入框、结果、分页）
+             * 会全部重建 —— 这就是"每次进搜索都是待搜索"的实现方式。
+             */
+            key(searchResetToken) {
+                SearchScreen(
+                    onOpenAnime = { animeId -> navController.navigate(PlayRoute(animeId = animeId)) },
+                    onBack = { navController.popBackStack() },
+                    initialKeyword = searchKeyword,
+                    onKeywordChange = onSearchKeywordChange,
+                )
+            }
         }
 
         composable<HistoryRoute> {

@@ -395,8 +395,15 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
     val gridState = rememberLazyGridState()
     // 下拉刷新：加一个自增 key 让下面的 LaunchedEffect 重新跑一遍（清空 + 拉第一页）
     var refreshKey by rememberSaveable { mutableIntStateOf(0) }
-    // 已经处理过的刷新 key：返回本页时如果没变过，就直接复用已有列表
-    var handledRefreshKey by rememberSaveable { mutableIntStateOf(0) }
+    /**
+     * 上一次**真正发过请求**时用的完整条件（筛选 + 排序 + 刷新 key）。
+     *
+     * @description 以前这里只记了刷新 key，判断写成「列表非空 && 刷新 key 没变就跳过」，
+     * 结果改了筛选条件（年份/排序…）effect 虽然重新触发，却因为刷新 key 没变被提前 return 掉，
+     * 列表还是旧数据，必须手动下拉刷新才更新。现在记的是整个条件串，
+     * 条件一变就一定重新拉；只有「从二级页返回、条件一模一样」时才复用已有列表。
+     */
+    var handledQuery by rememberSaveable { mutableStateOf("") }
 
     // 筛选项（跟 Flutter 版一致：年份 / 月份 / 类型 / 来源 / 分类）
     var year by rememberSaveable { mutableStateOf("all") }
@@ -404,6 +411,10 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
     var type by rememberSaveable { mutableStateOf("all") }
     var source by rememberSaveable { mutableStateOf("all") }
     var category by rememberSaveable { mutableStateOf("all") }
+
+    // 排序：默认按放映日期倒序；换排序字段时方向复位成该字段的自然顺序（名称 A→Z，其余从新/从高）
+    var sort by rememberSaveable { mutableStateOf("date") }
+    var order by rememberSaveable { mutableStateOf("desc") }
 
     /** 加载下一页（正在加载或没有下一页时直接返回） */
     suspend fun loadNextPage() {
@@ -422,6 +433,8 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
             type = type,
             source = source,
             category = category,
+            sort = sort,
+            order = order,
         )
             .onSuccess { paged ->
                 // 去重追加：服务端按评分排序存在并列，翻页边界可能重复返回同一条；
@@ -438,16 +451,19 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
 
     // 首次进入 + 筛选变化 + 下拉刷新：清空重新拉第一页；
     // 从二级页返回时（列表还在、条件没变）直接复用，不再请求
-    LaunchedEffect(year, month, type, source, category, refreshKey) {
-        if (items.isNotEmpty() && refreshKey == handledRefreshKey) {
+    val queryKey = "$year|$month|$type|$source|$category|$sort|$order|$refreshKey"
+
+    LaunchedEffect(queryKey) {
+        if (items.isNotEmpty() && queryKey == handledQuery) {
             return@LaunchedEffect
         }
 
+        handledQuery = queryKey
         items.clear()
         page = 0
         hasMore = true
+        loading = false
         loadNextPage()
-        handledRefreshKey = refreshKey
         refreshing = false
     }
 
@@ -501,6 +517,22 @@ private fun AnimeListTab(onOpenAnime: (Int) -> Unit) {
                 options = AnimeFilterOptions.category,
                 value = category,
                 onSelect = { category = it },
+            )
+            FilterSelector(
+                label = "排序",
+                options = AnimeFilterOptions.sort,
+                value = sort,
+                onSelect = { picked ->
+                    sort = picked
+                    // 换字段顺手把方向设成该字段的自然顺序，免得出现"名称 Z→A"这种别扭默认
+                    order = if (picked == "name") "asc" else "desc"
+                },
+            )
+            FilterSelector(
+                label = "方向",
+                options = AnimeFilterOptions.order,
+                value = order,
+                onSelect = { order = it },
             )
         }
 

@@ -1,6 +1,7 @@
 package top.nekoanime.mobile.app.page.play
 
 import androidx.activity.compose.BackHandler
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,9 +25,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
+import top.nekoanime.mobile.app.data.repository.UserRepository
 import top.nekoanime.mobile.app.component.rememberSaveableState
 import top.nekoanime.mobile.app.component.PlaySkeleton
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
+import top.nekoanime.mobile.app.state.SessionState
+import kotlinx.coroutines.launch
 
 /**
  * 播放路由。
@@ -61,6 +66,7 @@ fun PlayRouteScreen(
     val playback: PlaybackViewModel = viewModel()
     val context = LocalContext.current
     val player = remember(playback) { playback.player(context) }
+    val scope = rememberCoroutineScope()
     // 只记"详情加载失败了"这一个布尔值：原始报错（接口、后端说明）只写 logcat，不上界面
     var failed by rememberSaveable(animeId) { mutableStateOf(false) }
     var loading by rememberSaveable(animeId) { mutableStateOf(true) }
@@ -98,10 +104,68 @@ fun PlayRouteScreen(
 
     val detail = anime
 
+    // 追番状态：跟番剧走，返回本页时还在。未登录时永远是 false（按钮也是禁用的）
+    var subscribed by rememberSaveable(animeId) { mutableStateOf(false) }
+    // 请求进行中：挡住连点，避免同一个按钮点两下发出两次取反请求
+    var subscribeBusy by remember(animeId) { mutableStateOf(false) }
+
+    // 登录了才问后端要状态；详情还没到、或者退出登录，都回到"未追番"
+    LaunchedEffect(detail?.id, SessionState.loggedIn) {
+        val current = detail
+
+        if (current == null || !SessionState.loggedIn) {
+            subscribed = false
+            return@LaunchedEffect
+        }
+
+        UserRepository.subscribed(current.id).onSuccess { subscribed = it }
+    }
+
+    /**
+     * 点追番 / 取消追番。
+     *
+     * @description 成功后用**后端返回的状态**更新界面（不拿本地状态猜），并提示一句结果；
+     * 失败就只提示、不改状态，用户可以再点一次。未登录时按钮本来就是禁用的，这里再挡一层。
+     */
+    fun toggleSubscribe() {
+        val current = detail ?: return
+
+        if (subscribeBusy || !SessionState.loggedIn) {
+            return
+        }
+
+        val target = !subscribed
+        subscribeBusy = true
+
+        scope.launch {
+            UserRepository.updateSubscribed(current.id, target)
+                .onSuccess { latest ->
+                    subscribed = latest
+                    Toast.makeText(
+                        context,
+                        if (latest) "已加入追番" else "已取消追番",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .onFailure { failure ->
+                    Toast.makeText(
+                        context,
+                        failure.message ?: "操作失败，请稍后再试",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+
+            subscribeBusy = false
+        }
+    }
+
     if (detail != null) {
         PlayScreen(
             anime = detail,
             player = player,
+            loggedIn = SessionState.loggedIn,
+            subscribed = subscribed,
+            onToggleSubscribe = { toggleSubscribe() },
             fullscreen = fullscreen,
             onToggleFullscreen = onToggleFullscreen,
             onBack = onBack,

@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,14 +29,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.nekoanime.mobile.app.config.AnimeFilterOption
 
-/** 选择器高度（跟 Flutter 版 selector 一个量级） */
+/** 触发胶囊高度（跟 Flutter 版 selector 一个量级） */
 private val SelectorHeight = 40.dp
 
 /**
- * 筛选项选择器。
+ * 筛选项选择器（触发胶囊）。
  *
- * @description 与 Flutter 版 `selector` 一致：一个圆角小方块，显示「标签 值」+ 下拉箭头，
- * 点开是下拉菜单。列表页顶部那一排筛选就是它的横向排列。
+ * @description 只是一个胶囊：显示「标签 当前值」+ 下拉箭头，点开调用 {@link OptionPickerSheet}
+ * 弹出底部滚轮选择面板。选择面板本身抽成了独立组件，别处要用同样的选择交互可以直接复用。
  *
  * @param label 筛选项名称（年份/月份/…）
  * @param options 可选项
@@ -62,15 +60,16 @@ fun FilterSelector(
         Row(
             modifier = Modifier
                 .height(SelectorHeight)
-                .clip(RoundedCornerShape(8.dp))
+                // iOS 的筛选胶囊是圆头（胶囊形），不是小圆角方块
+                .clip(RoundedCornerShape(percent = 50))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(percent = 50))
                 .clickable(
                     interactionSource = interaction,
                     indication = null,
                     onClick = { expanded = true },
                 )
-                .padding(horizontal = 10.dp),
+                .padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -89,16 +88,14 @@ fun FilterSelector(
             )
         }
 
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(text = option.label) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option.value)
-                    },
-                )
-            }
+        if (expanded) {
+            OptionPickerSheet(
+                title = label,
+                options = options,
+                value = value,
+                onSelect = onSelect,
+                onDismiss = { expanded = false },
+            )
         }
     }
 }

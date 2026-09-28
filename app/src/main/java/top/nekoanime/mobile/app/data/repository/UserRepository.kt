@@ -28,6 +28,24 @@ object UserRepository {
         UserApi.history(page = page, limit = limit).map { dto -> dto.data.map { it.toHistory() } }
 
     /**
+     * 取某个番剧的追番状态（播放页的追番按钮）。
+     *
+     * @param animeId 番剧 id
+     * @returns 是否已追番
+     */
+    suspend fun subscribed(animeId: Int): Result<Boolean> = UserApi.subscribed(animeId)
+
+    /**
+     * 修改某个番剧的追番状态。
+     *
+     * @param animeId 番剧 id
+     * @param status true = 追番，false = 取消追番
+     * @returns 后端返回的最终状态
+     */
+    suspend fun updateSubscribed(animeId: Int, status: Boolean): Result<Boolean> =
+        UserApi.updateSubscribed(animeId, status)
+
+    /**
      * 取当前登录用户的资料（顶栏头像、用户页）。
      *
      * @returns 用户资料

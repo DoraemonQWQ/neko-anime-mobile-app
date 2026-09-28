@@ -34,20 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.nekoanime.mobile.app.model.entity.Episode
 
-/** 选集选中色：与前台主色一致（白 + 淡灰 + 粉里的那个粉） */
-private val EpisodeActiveColor = Color(0xFFE91E63)
-
-/** 抽屉面板底色：播放器控制栏是深色，抽屉也保持同一套深色，避免半黑半白 */
-private val EpisodePanelColor = Color(0xF21B1C20)
-
-/**
- * 抽屉面板宽度。
- *
- * @description 播放器那边的遮罩要按这个宽度给抽屉让出右侧（只让阴影接"点击关闭"），
- * 所以宽度放在这里共用，改一处两边都对。
- */
-val EpisodeDrawerWidth = 320.dp
-
 /**
  * 全屏选集抽屉。
  *
@@ -83,8 +69,8 @@ fun EpisodeDrawer(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(EpisodeDrawerWidth)
-            .background(EpisodePanelColor)
+            .width(PlayerDrawerWidth)
+            .background(PlayerDrawerPanelColor)
             // 面板整体吃掉触摸：点标题、点按钮之间的空隙都算"点在抽屉里"，
             // 既不会把抽屉关掉，也不会穿透到底下的播放/进度条/全屏按钮上。
             // 位置放在 background 之后、内容之前，不影响抽屉里列表的滚动（子节点先拿到 Main 事件）。
@@ -100,7 +86,7 @@ fun EpisodeDrawer(
                     .width(5.dp)
                     .height(20.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(EpisodeActiveColor),
+                    .background(PlayerDrawerActiveColor),
             )
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -161,7 +147,7 @@ private fun EpisodeButton(
         modifier = Modifier
             .height(56.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (active) EpisodeActiveColor else Color.White.copy(alpha = 0.08f))
+            .background(if (active) PlayerDrawerActiveColor else Color.White.copy(alpha = 0.08f))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
