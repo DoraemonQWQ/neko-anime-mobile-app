@@ -93,6 +93,16 @@ object ApiRoutes {
      */
     fun userEpisodeProgress(episodeId: Int): String = "/api/user/data/episode/$episodeId/progress"
 
+    /**
+     * 某个番剧的追番状态（需要登录）。
+     *
+     * @description GET 取当前状态，POST 改状态（请求体 `{"status": true|false}`），两个动作共用一个路径。
+     *
+     * @param animeId 番剧 id
+     * @returns 接口路径
+     */
+    fun userAnimeSubscribe(animeId: Int): String = "/api/user/data/anime/$animeId/subscribe"
+
     // ==================== 客户端更新（公开） ====================
 
     /** 检查更新 */
