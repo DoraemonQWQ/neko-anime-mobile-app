@@ -7,6 +7,7 @@ import top.nekoanime.mobile.app.model.entity.AnimeBrief
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
 import top.nekoanime.mobile.app.model.entity.Episode
 import top.nekoanime.mobile.app.model.entity.EpisodePlay
+import top.nekoanime.mobile.app.model.entity.parseEpisodeSubtitles
 
 /**
  * 分页结果（列表页用）。
@@ -118,14 +119,16 @@ object AnimeRepository {
         AnimeApi.detail(animeId).map { it.toDetail() }
 
     /**
-     * 某一集的播放信息。
+     * 某一集的播放信息；字幕独立解析，畸形字幕不影响主视频。
      *
      * @param episodeId 剧集 id
-     * @param episode 对应的剧集（用于组装返回值）
-     * @returns 播放信息
+     * @param episode 对应的剧集
+     * @returns 视频地址与原始字幕描述
      */
     suspend fun episodePlay(episodeId: Int, episode: Episode): Result<EpisodePlay> =
-        AnimeApi.episodePlay(episodeId).map { dto -> EpisodePlay(episode = episode, videoUrl = dto.video) }
+        AnimeApi.episodePlay(episodeId).map { dto ->
+            EpisodePlay(episode, dto.video, parseEpisodeSubtitles(dto.subtitles))
+        }
 }
 
 /**

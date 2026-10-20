@@ -1,6 +1,6 @@
 # Neko Anime 移动端（Android）
 
-Neko Anime 的安卓客户端，接口全部来自 [Neko Anime 后端](../../Server/NekoAnime)。当前发布版本 **1.4.0**。
+Neko Anime 的安卓客户端，接口全部来自 [Neko Anime 后端](../../Server/NekoAnime)。当前发布版本 **1.4.1**。
 
 ## 技术栈
 

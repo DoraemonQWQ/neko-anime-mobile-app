@@ -10,6 +10,9 @@ navigation = "2.8.4"
 media3 = "1.4.1"
 coil = "2.7.0"
 kotlinxSerialization = "1.7.3"
+junit = "4.13.2"
+robolectric = "4.14.1"
+okhttp = "4.12.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,6 +44,10 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 
 # JSON：后端接口的序列化
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
