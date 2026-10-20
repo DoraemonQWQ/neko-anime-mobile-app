@@ -18,7 +18,7 @@ val hasReleaseKeystore = keystoreProperties.getProperty("storeFile") != null
  * - `versionName` 那三段是**发布版本**，只有确认发版时才动；
  * - dev 期只在后面挂 `-dev.<构建号>`，既能一眼看出手机上装的是哪一次构建，
  *   也不会把发布版本号白白用掉（之前每个小改动都 +0.0.1，结果线上还是 1.2.21、
- *   仓库里已经写到 1.2.31 了）。
+ *   仓库里已经写到了 1.2.31 了）。
  * 取不到 git（比如在没有 git 的环境里打包）就退化成 0，不影响出包。
  */
 val devBuildNumber: Int = runCatching {
@@ -49,8 +49,8 @@ android {
          * versionCode 跟着版本号推导（跟后端 AppReleaseService.BuildVersionCode 同一套公式：
          * 主 * 1000000 + 次 * 10000 + 补丁 * 100 + 构建号），保证单调递增、能被安卓正常覆盖安装。
          */
-        versionCode = 1_040_000
-        versionName = "1.4.0"
+        versionCode = 1_040_100
+        versionName = "1.4.1"
 
         // 用哪个配置文件（真正的值都在 assets/config/config.<模式>.json 里）
         buildConfigField("String", "CONFIG_FILE", "\"config/config.debug.json\"")
@@ -128,6 +128,10 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -164,6 +168,10 @@ dependencies {
 
     // 接口 JSON
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

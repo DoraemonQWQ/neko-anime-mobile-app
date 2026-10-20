@@ -1,19 +1,19 @@
 package top.nekoanime.mobile.app.model.entity
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 一集数据。
  *
- * @description 正式项目里这些字段都来自后端：`id` 是 Bangumi 剧集 id、`url` 是后端拼好桶域名的播放地址、
- * `number` 是集数（选集抽屉与上下集按钮都按它排序与展示）。
- * 测试工程里先用几条真实 R2 视频代替，字段含义保持一致，方便以后直接替换成接口数据。
- *
- * 集数允许不连续（比如只有第 1、3、4 集），上下集按钮按列表顺序走，不按数字加减。
- *
- * @param id 剧集 id（唯一，用来标记"当前正在播放的是哪一集"）
+ * @param id 剧集 id
  * @param number 集数（展示用）
- * @param title 剧集标题（为空时界面用「第 N 集」兜底）
+ * @param title 剧集标题
  */
 @Serializable
 data class Episode(
@@ -23,15 +23,44 @@ data class Episode(
 )
 
 /**
- * 一集的播放信息。
- *
- * @description 播放地址不在剧集列表里，要单独问后端拿（`/api/anime/episode/play/{episodeId}`），
- * 拿到的是后端拼好桶域名的完整地址。
+ * 一集的播放信息，字幕失败不影响视频地址。
  *
  * @param episode 对应的剧集
  * @param videoUrl 可直接播放的地址
+ * @param subtitles 外挂字幕的完整元数据
  */
+@Serializable
 data class EpisodePlay(
     val episode: Episode,
     val videoUrl: String,
+    val subtitles: List<EpisodeSubtitle> = emptyList(),
 )
+
+/**
+ * 外挂字幕描述；保留整个响应对象，不丢弃 id、format 及未来扩展字段。
+ *
+ * @param metadata 后端原始字幕对象；当前契约为 label/language/default/url，未声明 format 时是 WebVTT
+ */
+@Serializable
+data class EpisodeSubtitle(val metadata: JsonObject) {
+    val id: JsonElement? get() = metadata["id"]
+    val label: String get() = text("label").orEmpty()
+    val language: String? get() = text("language")
+    val format: String? get() = text("format")
+    val url: String get() = text("url").orEmpty()
+    val isDefault: Boolean get() = (metadata["default"] as? JsonPrimitive)?.booleanOrNull == true
+
+    /** 仅读取字符串字段；错误类型仍保留在元数据中，但不作为下载地址或格式使用。 */
+    private fun text(name: String): String? =
+        (metadata[name] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+}
+
+/**
+ * 独立解析字幕资源列表，忽略畸形条目并完整保留有效对象。
+ *
+ * @param value 接口字幕字段；null、非数组或缺失时没有外挂字幕
+ */
+fun parseEpisodeSubtitles(value: JsonElement): List<EpisodeSubtitle> =
+    (value as? JsonArray).orEmpty().mapNotNull { entry ->
+        (entry as? JsonObject)?.let(::EpisodeSubtitle)?.takeIf { it.url.isNotBlank() }
+    }

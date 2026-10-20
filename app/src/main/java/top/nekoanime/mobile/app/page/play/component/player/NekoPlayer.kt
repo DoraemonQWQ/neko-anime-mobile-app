@@ -7,7 +7,6 @@ import android.media.AudioManager
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.ViewGroup
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -55,7 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.media3.common.MediaItem
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.PlaybackException
@@ -68,8 +68,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
-import top.nekoanime.mobile.app.model.entity.Episode
 import kotlinx.coroutines.delay
+import top.nekoanime.mobile.app.model.entity.Episode
+import top.nekoanime.mobile.app.model.entity.EpisodeSubtitle
+import top.nekoanime.mobile.app.page.play.PlaybackViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -115,6 +117,7 @@ private const val MaxSeekFractionPerDrag = 0.5f
  *
  * @description 只做播放器本身：画面、手势、控制栏、HUD、弹幕预留位。
  * 业务（选集、Bangumi 数据、上报进度）都留在外面，方便并入正式项目时按模块拼装。
+ * 外挂和内嵌字幕共用原生渲染器、播放器时钟及单轨选择菜单；字幕晚到不重建视频源。
  *
  * 手势与 B 站移动端对齐：单击显隐控制栏、双击播放/暂停与快进快退、
  * 水平拖动调进度、左半屏竖滑调亮度、右半屏竖滑调音量、长按 2 倍速；锁定后除解锁外全部忽略。
@@ -122,10 +125,11 @@ private const val MaxSeekFractionPerDrag = 0.5f
  * 双击分区：中间 50% 是播放/暂停，左右各 25% 是后退/前进 10 秒
  * （播放/暂停是最高频操作，分区给足宽度才不会"怎么点都在快进"）。
  *
- * 切集靠换 MediaItem，播放器实例、播放方向与全屏状态都不重建：
+ * 切集靠换媒体源，播放器实例、播放方向与全屏状态都不重建：
  * 全屏选集抽屉走的是 {@link onSelectEpisode}，由外层统一改当前集。
  *
- * @param episode 当前剧集（视频地址、标题、集数都在里面）
+ * @param player 返回栈会话持有的播放器
+ * @param episode 当前真正加载的剧集
  * @param url 当前剧集的播放地址（由外层从后端拿到后传进来）
  * @param modifier 尺寸约束
  * @param animeTitle 番剧名（顶栏标题的第一段：番剧名 + 剧集名 + 集数）
@@ -140,6 +144,7 @@ private const val MaxSeekFractionPerDrag = 0.5f
  * @param onPlayerReady 播放器创建完成（外层可用来做统计、上报）
  * @param onProgress 进度回报（剧集 id、当前位置、总时长）：每 5 秒一次，换源前与离开时各补一次；
  * 外层用它写本地进度。注意第一个参数是**播放器里真正加载的那一集**，不是"用户刚点的那一集"。
+ * @param subtitles 完整外挂描述，交给会话独立异步下载
  */
 // Media3 把 PlayerView / AspectRatioFrameLayout / Player#getVideoFormat 这些标成了 @UnstableApi：
 // 用它们必须显式 opt-in，否则 lint 会按 error 报（编辑器里就是那三处红），
@@ -164,9 +169,13 @@ fun NekoPlayer(
     onHome: () -> Unit = {},
     onPlayerReady: (ExoPlayer) -> Unit = {},
     onProgress: (episodeId: Int, positionMs: Long, durationMs: Long) -> Unit = { _, _, _ -> },
+    subtitles: List<EpisodeSubtitle> = emptyList(),
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
+    val playback: PlaybackViewModel = viewModel()
+    val subtitleSession = remember(playback) { playback.subtitles(context) }
+    val availableExternalIds by subtitleSession.availableTrackIds.collectAsStateWithLifecycle()
 
     // 顶栏标题：番剧名、剧集名、集数三段用「 | 」拼成一条（空格当分隔太不明显；
     // 太长时由控制栏做跑马灯，每滚一次停 10 秒、进来也先停 10 秒）
@@ -194,8 +203,11 @@ fun NekoPlayer(
     // 字幕抽屉是否展开
     var subtitleDrawerOpen by remember { mutableStateOf(false) }
 
-    // 视频里自带的内嵌字幕轨（字幕抽屉列的就是它）。空表示这个文件没有字幕轨，此时不显示字幕按钮
-    var subtitleTracks by remember { mutableStateOf<List<SubtitleTrack>>(emptyList()) }
+    // 内嵌轨和下载校验成功的外挂共用菜单，未就绪外挂不占可用轨的位置。
+    var currentTracks by remember(player) { mutableStateOf(player.currentTracks) }
+    val subtitleTracks = remember(currentTracks, availableExternalIds) {
+        collectSubtitleTracks(currentTracks, availableExternalIds)
+    }
 
     // 播放器里**当前真正加载**的那一集：必须和外层传进来的 episode 分开——
     // 外层一改 state，episode 立刻是新剧集，但播放器里播的还是上一集（换源是后面的 effect 才做的）。
@@ -206,7 +218,7 @@ fun NekoPlayer(
     val currentOnProgress by rememberUpdatedState(onProgress)
 
     // 播放器由外层（播放页的 ViewModel）持有：
-    // - 同一页面里切 URL 只换 MediaItem，不重建播放器；
+    // - 同一页面里切 URL 只换媒体源，不重建播放器；
     // - 从别的播放页返回时拿到的是同一个实例，缓冲与进度都还在，不会重新加载。
 
     // 切到后台之前是不是在播：决定回到前台要不要自动继续
@@ -244,8 +256,7 @@ fun NekoPlayer(
     var durationMs by remember { mutableLongStateOf(0L) }
     var bufferedMs by remember { mutableLongStateOf(0L) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
-    // 只记"出错了没有"这一个布尔值：具体错误码、错误信息、堆栈一律只写 logcat（见 onPlayerError），
-    // 界面上只给用户一句"播放失败"+ 重试按钮，不把播放器的原始报错糊到用户脸上
+    // 界面只显示是否出错，日志也不输出可能带签名 URL 的底层消息。
     var hasError by remember { mutableStateOf(false) }
 
     /**
@@ -293,16 +304,19 @@ fun NekoPlayer(
         onPlayerReady(player)
 
         val listener = object : Player.Listener {
+            /** 同步播放状态与弹幕预留层。 */
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playing = isPlaying
                 danmakuLayer.onPlayStateChanged(isPlaying)
             }
 
+            /** 同步原生视频视口。 */
             override fun onVideoSizeChanged(size: VideoSize) {
                 videoSize = size
                 danmakuLayer.onViewportChanged(size.width, size.height)
             }
 
+            /** 同步缓冲与首次就绪状态。 */
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
 
@@ -312,20 +326,20 @@ fun NekoPlayer(
                 }
             }
 
+            /** 视频错误不打印带签名地址的底层消息。 */
             override fun onPlayerError(error: PlaybackException) {
-                // 报错细节只进日志：现场排查靠这行（错误码 + 底层信息 + 堆栈全在）
                 hasError = true
 
                 // 出错时把控制栏亮出来：返回键、主页键都在里面，
                 // 不然用户一上来看到"播放失败"却连退出去的按钮都找不到
                 controlsVisible = true
 
-                android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName} / ${error.message}", error)
+                android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName}")
             }
 
+            /** 原生轨道变化与外挂就绪状态一起决定统一菜单。 */
             override fun onTracksChanged(tracks: Tracks) {
-                // 内嵌字幕轨每次换源都会重建，跟着刷新抽屉里的列表
-                subtitleTracks = collectSubtitleTracks(tracks)
+                currentTracks = tracks
             }
         }
 
@@ -359,13 +373,14 @@ fun NekoPlayer(
         }
     }
 
-    // URL 变化：换源（同一个播放器实例）
-    LaunchedEffect(url) {
-        // 返回本页（或被压在下面再回来）：媒体源没变就直接接着播——
-        // 不重新 setMediaItem、不 prepare、也不重新 seek，缓冲与进度都保留着
-        val currentUrl = player.currentMediaItem?.localConfiguration?.uri?.toString()
+    // 仅切集或视频地址变化时建源；晚到字幕只刷新菜单，不重建视频。
+    LaunchedEffect(episode.id, url) {
+        // 返回已有播放会话时保留媒体源、缓冲和位置。
+        val currentItem = player.currentMediaItem
+        val sameSource = currentItem?.localConfiguration?.uri?.toString() == url &&
+            currentItem.mediaId == episode.id.toString()
 
-        if (player.mediaItemCount > 0 && currentUrl == url) {
+        if (player.mediaItemCount > 0 && sameSource) {
             loadedEpisodeId.intValue = episode.id
 
             // 上次会话是停在出错状态（idle）的：这时候光 play() 不会重新加载，
@@ -382,14 +397,22 @@ fun NekoPlayer(
         }
 
         hasError = false
-        android.util.Log.i("NekoPlayer", "换源: $url")
+        drawerOpen = false
+        subtitleDrawerOpen = false
+        android.util.Log.i("NekoPlayer", "换源: episode=${episode.id}")
 
         // 换源前把上一集的进度补报一次（此时 episode 已经是新值，所以要报 loadedEpisodeId）
         if (player.mediaItemCount > 0) {
             currentOnProgress(loadedEpisodeId.intValue, player.currentPosition, durationMs)
         }
 
-        player.setMediaItem(MediaItem.fromUri(url))
+        // 预留轨尚未下载，不允许默认选择抢占可用内嵌轨。
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        currentTracks = Tracks.EMPTY
+        subtitleSession.setSource(player, url, subtitles, episode.id.toString())
         player.prepare()
 
         // 续播：外层已经把"这一集该从哪秒开始"算好了（本地进度优先），这里只负责跳过去
@@ -406,6 +429,32 @@ fun NekoPlayer(
         loadedEpisodeId.intValue = episode.id
     }
 
+    LaunchedEffect(episode.id, url, subtitleTracks) {
+        // 换源 effect 与选轨 effect 可能同帧启动，绝不把旧集 TrackGroup 应用到新源。
+        val sourceMatches = player.currentMediaItem?.mediaId == episode.id.toString() &&
+            player.currentMediaItem?.localConfiguration?.uri?.toString() == url
+        if (sourceMatches && currentTracks == player.currentTracks &&
+            !subtitleSession.subtitleChoiceMade && subtitleTracks.isNotEmpty()
+        ) {
+            val track = subtitleTracks.firstOrNull { it.selected }
+                ?: subtitleTracks.firstOrNull {
+                    val format = it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())
+                    format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0
+                }
+                ?: subtitleTracks.firstOrNull {
+                    val format = it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())
+                    isChineseLanguage(format.language)
+                }
+                ?: subtitleTracks.first()
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(track.override)
+                .build()
+            subtitleSession.subtitleChoiceMade = true
+        }
+        if (subtitleTracks.isEmpty()) subtitleDrawerOpen = false
+    }
+
     // 全屏切换只改布局，不碰播放器。打一行日志方便用 logcat 验证「切全屏没有重新加载」
     LaunchedEffect(fullscreen) {
         android.util.Log.i("NekoPlayer", "fullscreen=$fullscreen（播放器不重建）")
@@ -417,8 +466,9 @@ fun NekoPlayer(
     }
 
     // 抽屉展开时，系统返回键先收抽屉，而不是直接退出播放页
-    BackHandler(enabled = drawerOpen) {
+    BackHandler(enabled = drawerOpen || subtitleDrawerOpen) {
         drawerOpen = false
+        subtitleDrawerOpen = false
     }
 
     /** 一次操作开始：暂停自动隐藏 + 重新计时 */
@@ -433,20 +483,23 @@ fun NekoPlayer(
     }
 
     /**
-     * 重试播放。
+     * 重试播放及独立字幕请求。
      *
-     * @description 出错后 ExoPlayer 会停在 idle 状态，不会自己再往下走，必须重新 prepare 才会再次发起请求。
-     * 重试前先记下当前进度，重新加载后跳回去，用户不会因为一次网络抖动就从这一集的开头重看。
-     *
-     * 失败原因（错误码、底层 message、堆栈）只写 logcat，不往界面上传递。
+     * @description 重建媒体源前清理旧字幕覆盖，并保留当前进度。
+     * 日志只记录剧集与位置，不输出带签名的地址。
      */
     fun retryPlayback() {
         val resumeMs = player.currentPosition.coerceAtLeast(0L)
 
-        android.util.Log.i("NekoPlayer", "重试播放: $url @ ${resumeMs}ms")
+        android.util.Log.i("NekoPlayer", "重试播放: episode=${episode.id} @ ${resumeMs}ms")
 
         hasError = false
-        player.setMediaItem(MediaItem.fromUri(url))
+        currentTracks = Tracks.EMPTY
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        subtitleSession.setSource(player, url, subtitles, episode.id.toString())
         player.prepare()
 
         if (resumeMs > 0L) {
@@ -488,7 +541,7 @@ fun NekoPlayer(
         android.util.Log.i("NekoPlayer", "控制栏 visible=$controlsVisible locked=$locked")
     }
 
-    // 每 250ms 刷一次进度：进度条与 HUD 的平滑度靠它
+    // 每 250ms 仅刷新进度 UI，字幕渲染与同步完全交给原生播放器时钟。
     LaunchedEffect(player) {
         // 日志计数：按时间打（20 × 250ms = 5 秒一条），
         // 不用"位置是 5 秒整数倍"来判断——暂停时那样会一条都不打，排查问题时看不到状态
@@ -653,7 +706,7 @@ fun NekoPlayer(
                 .playerGestures(
                     // 抽屉展开时关掉播放器手势：抽屉是模态浮层，
                     // 这时在阴影/抽屉上滑动不该再改播放进度或亮度音量
-                    enabled = !drawerOpen,
+                    enabled = !drawerOpen && !subtitleDrawerOpen,
                     locked = locked,
                     // 首次加载没完成、或者播放失败时：双击跳转 / 双击播放暂停 / 拖动进度 / 长按倍速全关。
                     // 单击仍然保留——控制栏要通过它显隐（不过这两种状态下控制栏本来就被钉住不隐藏）。
@@ -772,7 +825,6 @@ fun NekoPlayer(
         }
 
         // 播放失败：只给一句笼统提示 + 一个重试按钮。
-        // 原始错误（错误码/底层 message/堆栈）只写 logcat，见 onPlayerError，界面上一个字都不露。
         // 整块是一个居中的 Column，不含任何单边 padding，所以按钮与文字严格落在画面中心。
         if (hasError) {
             Column(
@@ -807,7 +859,7 @@ fun NekoPlayer(
         // 中央 HUD
         PlayerHud(state = hud, modifier = Modifier.fillMaxSize())
 
-        // 暂停时画面中央的大播放按钮（B 站 也是这样：暂停后中间有个明显的 ▶，点一下继续）。
+        // 暂停时画面中央的大播放按钮（B 站 也是这样：暂停后中间有个明显的播放键，点一下继续）。
         // 控制栏里已经没有播放/暂停按钮了，这个就是"恢复播放"最直观的入口。
         // 首次加载没完成时不显示（那时画面还没出来，摆个播放键只会让人以为能播起来了）
         if (!playing && !buffering && !hasError && !locked && firstLoadDone) {
@@ -905,7 +957,7 @@ fun NekoPlayer(
                 } else {
                     null
                 },
-                // 字幕按钮：文件里确实带内嵌字幕轨才显示（没有字幕的文件上摆个按钮只会让人以为坏了）
+                // 内嵌和下载校验成功的外挂共用菜单，只有完全无可用轨时隐藏。
                 subtitleDrawer = if (subtitleTracks.isNotEmpty()) {
                     {
                         drawerOpen = false
@@ -975,10 +1027,7 @@ fun NekoPlayer(
         }
 
         // ===== 字幕抽屉 =====
-        //
-        // 和选集同一套面板样式，只是列的是**文件自带的内嵌字幕轨**
-        // （内封的 MKV 里通常就有简繁两条）；想切外挂字幕得让服务端另外抽一份 VTT。
-        // 竖屏也用同一个抽屉（选集只在全屏出现，字幕没有这个限制）。
+        // 内嵌与外挂统一选轨，竖屏也使用同一个抽屉。
         AnimatedVisibility(
             visible = subtitleDrawerOpen,
             enter = slideInHorizontally(initialOffsetX = { it }),
@@ -990,19 +1039,25 @@ fun NekoPlayer(
                 // 竖屏播放器本来就矮，面板收窄一点，别把画面盖严
                 width = if (fullscreen) PlayerDrawerWidth else PlayerDrawerNarrowWidth,
                 onDisable = {
+                    subtitleSession.subtitleChoiceMade = true
                     player.trackSelectionParameters = player.trackSelectionParameters
                         .buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                         .build()
                     subtitleDrawerOpen = false
                 },
                 onSelect = { track ->
+                    subtitleSession.subtitleChoiceMade = true
                     player.trackSelectionParameters = player.trackSelectionParameters
                         .buildUpon()
                         // 之前关过字幕的话这里要重新打开，否则选了轨也不显示
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         .setOverrideForType(track.override)
                         .build()
+                    if (!player.playWhenReady) {
+                        player.seekTo(player.currentPosition)
+                    }
                     subtitleDrawerOpen = false
                 },
             )
@@ -1014,7 +1069,7 @@ fun NekoPlayer(
 }
 
 /**
- * 视频里自带的一条内嵌字幕轨。
+ * 内嵌或外挂的一条原生字幕轨。
  *
  * @param override 选中这条轨要用的 override
  * @param label 抽屉里显示的名字
@@ -1027,12 +1082,14 @@ internal data class SubtitleTrack(
 )
 
 /**
- * 从播放器的轨道信息里挑出内嵌字幕轨。
+ * 收集所有原生可解码字幕轨，外挂只有下载和解析成功后才成为可用选项。
  *
  * @param tracks 播放器上报的轨道集合
- * @returns 字幕轨列表（顺序与文件里的顺序一致）；没有字幕轨时为空
+ * @param availableExternalIds 已准备好的外挂轨道标识
+ * @returns 字幕轨列表（顺序与文件里的顺序一致）；没有可用字幕轨时为空
  */
-private fun collectSubtitleTracks(tracks: Tracks): List<SubtitleTrack> {
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+internal fun collectSubtitleTracks(tracks: Tracks, availableExternalIds: Set<String>): List<SubtitleTrack> {
     val formats = mutableListOf<Format>()
     val overrides = mutableListOf<TrackSelectionOverride>()
     val selected = mutableListOf<Boolean>()
@@ -1048,7 +1105,11 @@ private fun collectSubtitleTracks(tracks: Tracks): List<SubtitleTrack> {
                 continue
             }
 
-            formats += group.getTrackFormat(index)
+            val format = group.getTrackFormat(index)
+            if (format.id?.startsWith("neko-external:") == true && format.id !in availableExternalIds) {
+                continue
+            }
+            formats += format
             overrides += TrackSelectionOverride(group.mediaTrackGroup, index)
             selected += group.isTrackSelected(index)
         }
@@ -1068,10 +1129,8 @@ private fun collectSubtitleTracks(tracks: Tracks): List<SubtitleTrack> {
 /**
  * 给每条字幕轨起个能区分的名字。
  *
- * @description 优先用容器里写的轨道名，没有就用语言标记对应的中文名。
- * 中文组压的内封 MKV 常常两条轨**都没名字**、language 又都是 chi（简繁两条），
- * 这时按通行惯例当作「第 1 条简体、第 2 条繁体」——猜错也只是名字不准，
- * 点一下就能切到另一条，比两条都叫「中文」强。
+ * @description 优先用容器或服务端声明的轨道名，没有就用语言标记对应的中文名。
+ * 给重复名字编号，不根据轨道顺序猜测简繁体。
  *
  * @param formats 字幕轨的格式信息
  * @returns 与 formats 一一对应的名字
@@ -1087,11 +1146,7 @@ private fun buildSubtitleLabels(formats: List<Format>): List<String> {
         return base
     }
 
-    if (formats.size == 2 && formats.all { isChineseLanguage(it.language) }) {
-        return listOf("简体中文", "繁体中文")
-    }
-
-    // 其它情况按出现顺序编号，别让抽屉里出现两个一模一样的名字
+    // 按出现顺序编号，别让抽屉里出现两个一模一样的名字
     val seen = mutableMapOf<String, Int>()
 
     return base.map { name ->

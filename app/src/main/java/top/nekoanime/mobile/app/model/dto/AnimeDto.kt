@@ -2,6 +2,8 @@ package top.nekoanime.mobile.app.model.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 
 /**
  * 番剧列表项。
@@ -44,6 +46,7 @@ data class EpisodeDto(
  * 剧集播放信息。
  *
  * @param video 后端拼好的完整播放地址（桶域名 + 对象路径）
+ * @param subtitles 原始字幕字段，独立解析以隔离畸形字幕，并完整保留扩展元数据
  */
 @Serializable
 data class EpisodePlayDto(
@@ -55,6 +58,7 @@ data class EpisodePlayDto(
     @SerialName("episode_number") val episodeNumber: Double = 0.0,
     val cover: String = "",
     val video: String = "",
+    val subtitles: JsonElement = JsonNull,
 )
 
 /**

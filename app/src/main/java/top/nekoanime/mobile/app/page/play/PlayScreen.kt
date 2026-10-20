@@ -39,6 +39,7 @@ import top.nekoanime.mobile.app.data.local.LocalPlayProgress
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
 import top.nekoanime.mobile.app.model.entity.AnimeBrief
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
+import top.nekoanime.mobile.app.model.entity.EpisodePlay
 import top.nekoanime.mobile.app.page.play.component.AnimeInfoCard
 import top.nekoanime.mobile.app.page.play.component.EpisodeSection
 import top.nekoanime.mobile.app.page.play.component.RecommendSection
@@ -51,6 +52,8 @@ import top.nekoanime.mobile.app.state.SessionState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import kotlin.math.abs
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** 播放页底部推荐几个 */
@@ -71,6 +74,7 @@ private val PlayerBackdropColor = Color.Black
  *
  * 数据来源：番剧详情由 {@link PlayRoute} 从后端拉好后传进来；**每集的播放地址单独问后端**
  * （`/api/anime/episode/play/{episodeId}`），切集时重新取；推荐用后端的按题材推荐接口。
+ * 视频地址、所属剧集与外挂字幕元数据作为整体保存；字幕文件由播放会话独立异步加载。
  *
  * 续播规则（优先级从高到低）：
  * 1. 从历史记录 / 继续观看进来：直接用外面给的集数与进度；
@@ -82,6 +86,7 @@ private val PlayerBackdropColor = Color.Black
  * 页面内容（选集、卡片、推荐）跟随应用主题（白 / 淡灰 / 粉）。
  *
  * @param anime 番剧详情（含剧集列表）
+ * @param player 返回栈会话持有的播放器
  * @param fullscreen 是否全屏（由 MainActivity 控制方向与系统栏）
  * @param onToggleFullscreen 切换全屏
  * @param onBack 返回（全屏时先退出全屏）
@@ -119,8 +124,7 @@ fun PlayScreen(
         resolvePlaybackStart(anime, startEpisodeId, startPositionMs, progressStore)
     }
 
-    // 这几个状态都保存下来：从别的播放页返回时不会「先空一下再重新请求」——
-    // 上一次播的那一集、播放地址、推荐列表都还在，直接接着用（播放器实例也还在，见 PlaybackViewModel）
+    // 上一次播的那一集、播放响应、推荐列表一起保存，返回时不重建媒体源。
     var currentEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(start.episodeId) }
 
     /**
@@ -133,9 +137,10 @@ fun PlayScreen(
     var lastReportedAtMs by remember { mutableStateOf(0L) }
     var lastPositionSeconds by remember { mutableStateOf(0) }
     var lastReportedSeconds by remember { mutableStateOf(0) }
+    var progressEpisodeId by remember { mutableIntStateOf(start.episodeId) }
 
     /**
-     * 上报当前剧集的观看进度（仅登录用户）。
+     * 上报真正加载的剧集进度（仅登录用户）。
      *
      * @param force true 表示忽略节流（切集 / 离开页面这类关键时机用）
      */
@@ -161,8 +166,7 @@ fun PlayScreen(
 
         lastReportedAtMs = now
         lastReportedSeconds = seconds
-
-        val episodeId = currentEpisodeId
+        val episodeId = progressEpisodeId
 
         scope.launch {
             UserIdentityApi.reportProgress(episodeId, seconds)
@@ -178,20 +182,18 @@ fun PlayScreen(
     val currentEpisode = anime.episodes.firstOrNull { it.id == currentEpisodeId }
         ?: anime.episodes.firstOrNull()
 
-    // 播放地址：切集重新问后端。注意拿到新地址前保留旧地址，避免播放器被销毁重建。
-    val videoState = rememberSaveableState<String>("play_url_${anime.id}")
-    // 这个地址是哪一集的：只有集数变了才重新问后端，返回本页时不用再要一次
-    var videoUrlEpisodeId by rememberSaveable(anime.id) { mutableIntStateOf(-1) }
+    // 原子保存所属剧集、视频地址及字幕，切集请求期间继续保留旧播放会话。
+    val videoState = rememberSaveableState<EpisodePlay>("play_source_${anime.id}")
     var videoLoading by rememberSaveable(anime.id) { mutableStateOf(false) }
     // 只记"拿地址失败"这个布尔值：后端返回的原始报错只写 logcat，不给用户看
     var videoFailed by rememberSaveable(anime.id) { mutableStateOf(false) }
-    val videoUrl = videoState.value
+    val episodePlay = videoState.value
 
     LaunchedEffect(anime.id, currentEpisodeId) {
         val episode = currentEpisode ?: return@LaunchedEffect
 
         // 同一集的地址已经有了（返回本页 / 重组）：直接用，不重新请求
-        if (videoUrlEpisodeId == episode.id && !videoUrl.isNullOrBlank()) {
+        if (episodePlay?.episode?.id == episode.id && episodePlay.videoUrl.isNotBlank()) {
             videoLoading = false
             return@LaunchedEffect
         }
@@ -199,13 +201,12 @@ fun PlayScreen(
         videoLoading = true
         videoFailed = false
 
-        AnimeRepository.episodePlay(episode.id, episode)
-            .onSuccess {
-                videoState.value = it.videoUrl
-                videoUrlEpisodeId = episode.id
-            }
+        val result = AnimeRepository.episodePlay(episode.id, episode)
+        // API 层可能包装取消异常；明确阻止已取消的旧集请求更新页面。
+        coroutineContext.ensureActive()
+        result
+            .onSuccess { videoState.value = it }
             .onFailure { failure ->
-                // 原始报错（接口地址、后端说明）只进日志，界面上只提示"暂时播不了"
                 android.util.Log.e("PlayScreen", "拿播放地址失败: episode=${episode.id}", failure)
                 videoFailed = true
             }
@@ -231,15 +232,12 @@ fun PlayScreen(
 
     /** 切集：跳到这一集自己的本地进度，并把"这个番看到第几集"一起更新 */
     fun switchEpisode(episodeId: Int) {
-        // 切集前先把这一集看到哪儿补报一次
         reportProgress(force = true)
-
         currentEpisodeId = episodeId
         resumePositionMs = progressStore.readPositionMs(episodeId)
         progressStore.save(anime.id, episodeId, resumePositionMs)
     }
 
-    // 页面底色跟着主题走：亮色是白/淡灰、暗色是深灰（播放器那一段是固定黑，见下）
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -251,14 +249,15 @@ fun PlayScreen(
                 .fillMaxWidth()
                 .background(PlayerBackdropColor),
         ) {
-            val url = videoUrl
+            val source = episodePlay
 
-            if (url != null && currentEpisode != null) {
-                // 播放器：全屏与非全屏共用同一个调用点（切全屏不会重建播放器）
+            if (source != null) {
+                // 全屏与非全屏共用调用点；只在新响应成功后才一起切换剧集与源。
                 NekoPlayer(
                     player = player,
-                    episode = currentEpisode,
-                    url = url,
+                    episode = source.episode,
+                    url = source.videoUrl,
+                    subtitles = source.subtitles,
                     animeTitle = anime.title,
                     episodes = anime.episodes,
                     initialPositionMs = resumePositionMs,
@@ -268,11 +267,9 @@ fun PlayScreen(
                     onBack = onBack,
                     onHome = onHome,
                     onProgress = { episodeId, positionMs, durationMs ->
-                        // 播放中周期性写本地：只要真在播（有位置、有时长）就记
                         if (positionMs > 0 && durationMs > 0) {
                             progressStore.save(anime.id, episodeId, positionMs)
-
-                            // 登录用户同时上报服务端（节流在 reportProgress 里）
+                            progressEpisodeId = episodeId
                             lastPositionSeconds = (positionMs / 1000).toInt()
                             reportProgress()
                         }
@@ -280,7 +277,6 @@ fun PlayScreen(
                     modifier = playerModifier(fullscreen),
                 )
             } else {
-                // 还没拿到播放地址（或者在切集途中失败了）：占位，保持和播放器一样的尺寸，页面不跳
                 PlayerPlaceholder(
                     loading = videoLoading,
                     failed = videoFailed,
@@ -289,28 +285,22 @@ fun PlayScreen(
             }
         }
 
-        // 全屏时下面的内容不参与布局
         if (fullscreen) {
             return@Column
         }
 
-        // 固定区：选集（不跟着滚，切集时一直在眼前）
         EpisodeSection(
             episodes = anime.episodes,
             currentEpisodeId = currentEpisodeId,
             onSelect = { episodeId -> switchEpisode(episodeId) },
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
         )
-
-        // 固定区与滚动区之间的间距：放在滚动容器外面，滚起来不会被卷走
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 可滚动区：番剧介绍卡片 → 推荐
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp)
-                // 三键导航：留白加在外面（内容不进按键区）；手势导航：留在滚动内容里（沉浸式）
                 .then(if (gestureNavigation) Modifier else Modifier.navigationBarsPadding())
                 .verticalScroll(rememberScrollState())
                 .then(if (gestureNavigation) Modifier.navigationBarsPadding() else Modifier)
@@ -323,7 +313,6 @@ fun PlayScreen(
                 loggedIn = loggedIn,
                 onToggleSubscribe = onToggleSubscribe,
             )
-
             RecommendSection(items = recommendations, onSelect = onOpenAnime)
         }
     }
@@ -385,6 +374,5 @@ private fun PlayerPlaceholder(
 private fun isGestureNavigation(context: Context): Boolean = try {
     Settings.Secure.getInt(context.contentResolver, "navigation_mode", 0) >= 2
 } catch (_: Settings.SettingNotFoundException) {
-    // 读不到就按"非沉浸式"处理：让开导航栏最安全
     false
 }
