@@ -61,7 +61,10 @@ import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.config.AnimeFilterOptions
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.AnimeRepository
-import top.nekoanime.mobile.app.data.repository.UserRepository
+// 首页路由的恢复事件同时覆盖播放页返回与应用回到前台。
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import top.nekoanime.mobile.app.state.ContinueWatchingState
 import top.nekoanime.mobile.app.model.entity.AnimeBrief
 import top.nekoanime.mobile.app.model.entity.WatchHistory
 import top.nekoanime.mobile.app.page.home.component.AnimeRow
@@ -137,6 +140,11 @@ fun HomeScreen(
     val bottomBarInteraction = remember { MutableInteractionSource() }
     // Tab 之间切换时保存各自的页面状态：切走再切回来，列表/滚动位置都还在，不会重新请求
     val tabStateHolder = rememberSaveableStateHolder()
+
+    // 监听整个首页路由而非主页 Tab：从播放页返回或后台恢复时，即使停在用户 Tab 也刷新历史。
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        ContinueWatchingState.refresh()
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -258,7 +266,8 @@ private fun HomeTabContent(
     // 这些列表用 rememberSaveable 存：从二级页返回时直接复用，不再请求一次、也不会白屏一下
     val hot = rememberSaveableList<AnimeBrief>("home_hot")
     val rows = rememberSaveableList<HomeRecommendRow>("home_rows")
-    val continueWatching = rememberSaveableList<WatchHistory>("home_continue")
+    // 历史由当前登录会话持有，不进入 Tab 的保存缓存；登录态为 false 时在当前帧就隐藏整行。
+    val continueWatching = if (SessionState.loggedIn) ContinueWatchingState.items else emptyList()
     var loading by rememberSaveable { mutableStateOf(true) }
     var failed by rememberSaveable { mutableStateOf(false) }
     var reloadKey by rememberSaveable { mutableIntStateOf(0) }
@@ -273,15 +282,8 @@ private fun HomeTabContent(
     LaunchedEffect(reloadKey) {
         val currentKey = reloadKey
 
-        // 从二级页返回（已有数据、也不是手动刷新）：
-        // 轮播与题材推荐直接用缓存不重拉，但「继续观看」必须刷新一下——
-        // 用户刚看完一集回来，那一行要反映最新进度。
+        // 返回主页时复用轮播和推荐缓存；继续观看由首页路由恢复事件独立刷新。
         if (loadedOnce && currentKey == handledReloadKey) {
-            continueWatching.clear()
-            continueWatching.addAll(
-                UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
-            )
-
             loading = false
             return@LaunchedEffect
         }
@@ -293,7 +295,6 @@ private fun HomeTabContent(
         // 请求失败时列表为空，下面的 failed 分支会给出错误提示，而不是留着过期数据假装成功。
         hot.clear()
         rows.clear()
-        continueWatching.clear()
 
         // 1) 轮播：后端热门，最多 carouselMax 个
         val hotResult = AnimeRepository.hot()
@@ -309,11 +310,6 @@ private fun HomeTabContent(
             },
         )
 
-        // 3) 继续观看：需要登录；未登录后端会 401，这里就是空列表（整块不显示）
-        continueWatching.addAll(
-            UserRepository.history(limit = homeConfig.continueWatchingMax).getOrDefault(emptyList()),
-        )
-
         failed = hotResult.isFailure && rows.isEmpty()
         loading = false
         loadedOnce = true
@@ -327,6 +323,8 @@ private fun HomeTabContent(
         onRefresh = {
             refreshing = true
             reloadKey += 1
+            // 手动下拉也拉取当前账号历史；未登录由状态层直接清空，不发鉴权请求。
+            ContinueWatchingState.refresh()
         },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -339,7 +337,7 @@ private fun HomeTabContent(
         ) {
         when {
             /*
-             * 等首页三块（轮播 / 题材推荐 / 继续观看）**全部**拿完再一次性换成真内容。
+             * 等公共内容（轮播 / 题材推荐）拿完再一次性撤下骨架；继续观看独立响应登录态和刷新结果。
              *
              * 判断条件必须用 loading 本身：之前写成 loading && hot.isEmpty() && rows.isEmpty()，
              * 而 hot 是第一个拿回来的 → 骨架提前撤掉 → 就出现"轮播先出来、下面空一片、

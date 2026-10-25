@@ -3,7 +3,8 @@ package top.nekoanime.mobile.app
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
+import top.nekoanime.mobile.app.logging.AppLog
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -55,6 +56,8 @@ import top.nekoanime.mobile.app.page.settings.SettingsScreen
 import top.nekoanime.mobile.app.page.splash.SplashScreen
 import top.nekoanime.mobile.app.service.UpdateService
 import top.nekoanime.mobile.app.state.SessionState
+import top.nekoanime.mobile.app.state.ContinueWatchingState
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * 应用入口。
@@ -146,6 +149,8 @@ class MainActivity : ComponentActivity() {
                 // 路由变化时同步「当前是不是播放页 / 首页」，并重算系统栏图标明暗
                 LaunchedEffect(entry) {
                     val onSearchPage = entry.isRoute<SearchRoute>()
+                    // 只记录页面类型，不输出搜索关键词或播放地址等用户数据。
+                    AppLog.d("Navigation", "进入页面 ${entry?.destination?.route?.substringBefore('/')?.substringBefore('?')}")
 
                     // 刚离开搜索页：把关键字与整页状态一起丢掉，下次进来重新开始
                     if (wasOnSearchPage && !onSearchPage) {
@@ -180,7 +185,7 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this@MainActivity, "再按一次退出应用", Toast.LENGTH_SHORT).show()
 
                     scope.launch {
-                        delay(exitConfirmMillis)
+                        delay(exitConfirmMillis.milliseconds)
                         exitPending = false
                     }
                 }
@@ -232,13 +237,25 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStart() {
         super.onStart()
+        // 恢复前台检查日志保留期，系统改时钟或后台跨日后不会继续展示过期日志。
+        AppLog.pruneAsync()
+        AppLog.i("Lifecycle", "应用进入前台")
 
         if (!startedOnce) {
             startedOnce = true
             return
         }
 
+        // 应用回到前台就同步账号历史，覆盖此时仍停留在播放页、设置页等非首页的情况。
+        ContinueWatchingState.refresh()
         refreshUpdateOnForeground()
+    }
+
+    /** 切后台补刷日志队列，持久化已发生的操作；刷盘在日志线程执行，不阻塞界面退出。 */
+    override fun onStop() {
+        super.onStop()
+        AppLog.i("Lifecycle", "应用进入后台")
+        AppLog.flushAsync()
     }
 
     /**

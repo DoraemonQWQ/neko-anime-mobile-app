@@ -2,12 +2,13 @@ package top.nekoanime.mobile.app.service
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import top.nekoanime.mobile.app.BuildConfig
 import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.api.ApiClient
@@ -106,7 +107,7 @@ object UpdateService {
 
             // 已经下好过同一个包：大小与 MD5 都对得上就直接复用，避免用户重复等一遍
             if (target.exists() && isComplete(target, info)) {
-                Log.i("NekoUpdate", "安装包已存在且校验通过，直接复用：${target.absolutePath}")
+                Log.i("NekoUpdate", "版本 ${info.version} 安装包已校验通过，直接复用")
                 return@runCatching target
             }
 
@@ -158,7 +159,7 @@ object UpdateService {
 
                 Log.i(
                     "NekoUpdate",
-                    "开始下载 $url（续传起点 $startAt，总大小 ${if (total > 0) total else -1}）",
+                    "GET ${url.toHttpUrlOrNull()?.encodedPath.orEmpty()} 开始下载（HTTP ${response.code}，续传起点 $startAt，总大小 ${if (total > 0) total else -1}）",
                 )
 
                 body.byteStream().use { input ->
@@ -219,10 +220,10 @@ object UpdateService {
                 error("安装包保存失败")
             }
 
-            Log.i("NekoUpdate", "安装包下载完成：${target.absolutePath}（${target.length()} 字节）")
+            Log.i("NekoUpdate", "版本 ${info.version} 安装包下载完成（${target.length()} 字节）")
 
             target
-        }.onFailure { error -> Log.w("NekoUpdate", "下载失败 -> ${error.message}") }
+        }.onFailure { error -> Log.w("NekoUpdate", "下载失败", error) }
     }
 
     /**
@@ -262,7 +263,7 @@ object UpdateService {
         val target = File(updateDirectory(context), buildApkName(info.version))
 
         if (target.exists() && isComplete(target, info)) {
-            Log.i("NekoUpdate", "已存在校验通过的安装包，无需重复下载：${target.absolutePath}")
+            Log.i("NekoUpdate", "版本 ${info.version} 已存在校验通过的安装包，无需重复下载")
             return@withContext target
         }
 

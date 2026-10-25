@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
 import android.os.BatteryManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -11,10 +14,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -36,7 +40,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,8 +77,7 @@ private data class BatteryState(val percent: Int, val charging: Boolean)
  *
  * 状态只在这个组件内部读取，所以时间/电量的刷新只会重组这一行，不会带着整个控制栏一起重组。
  *
- * 安全区：整行只让开顶部；**时钟按整屏居中**（刘海在横屏时多半会压到左/右边缘，
- * 如果整行都让开左右安全区，时间就会明显偏向一侧），电量单独让开右侧。
+ * 状态行固定 20dp，时钟按整屏居中；不叠加系统顶部留白，电量单独避让横屏挖孔并向内留 8dp。
  *
  * @param modifier 由控制栏给出的布局约束
  */
@@ -79,10 +86,12 @@ fun PlayerStatusBar(modifier: Modifier = Modifier) {
     val clock = rememberClockText()
     val battery = rememberBatteryState()
 
+    // 状态行只占固定 20dp，不消费顶部系统栏 inset；挖孔避让只施加于右侧电量。
+    // 首次旋转时旧方向 inset 可能暂留，固定行高可避免把标题推到画面中部。
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+            .height(20.dp),
     ) {
         Text(
             text = clock,
@@ -95,9 +104,11 @@ fun PlayerStatusBar(modifier: Modifier = Modifier) {
         BatteryIndicator(
             percent = battery.percent,
             charging = battery.charging,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End)),
+            // 仅电量避让右侧挖孔，再额外向内留 8dp；不改变外层整屏宽度，
+            // 时钟仍独立对齐屏幕中心，不会随右侧安全区或电量宽度一起偏移。
+            modifier = Modifier.align(Alignment.CenterEnd)
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))
+                .padding(end = 8.dp),
         )
     }
 }
@@ -193,6 +204,21 @@ private fun BatteryIndicator(
     charging: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val label = percent.coerceIn(0, 100).toString()
+    val textSizePx = with(LocalDensity.current) { 8.sp.toPx() }
+    // 数字直接绘制到电池画布，按字形可见边界定位；不引入 Text 的默认字体留白、
+    // 基线和行高，因此不会出现布局居中但肉眼看起来仍靠下的情况。
+    val numberPaint = remember(textSizePx) {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = textSizePx
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+    }
+    val numberBounds = remember(label, numberPaint) {
+        Rect().also { numberPaint.getTextBounds(label, 0, label.length, it) }
+    }
+
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -208,55 +234,60 @@ private fun BatteryIndicator(
             )
         }
 
-        Box(contentAlignment = Alignment.Center) {
-            Canvas(
-                modifier = Modifier
-                    .width(30.dp)
-                    .height(14.dp),
-            ) {
-                val strokeWidth = 1.2.dp.toPx()
-                val nubWidth = 1.6.dp.toPx()
-                val nubHeight = size.height * 0.36f
-                val bodyWidth = size.width - nubWidth - 1.dp.toPx()
-                val corner = 2.5.dp.toPx()
+        Canvas(
+            modifier = Modifier
+                .width(30.dp)
+                .height(14.dp)
+                // Canvas 替代 Text 后保留电量的无障碍描述。
+                .semantics { contentDescription = "电量 ${label}%" },
+        ) {
+            val strokeWidth = 1.2.dp.toPx()
+            val halfStroke = strokeWidth / 2f
+            val nubWidth = 1.6.dp.toPx()
+            val nubGap = 1.dp.toPx()
+            val nubHeight = size.height * 0.36f
+            val bodyWidth = size.width - nubWidth - nubGap
+            val corner = 2.5.dp.toPx()
 
-                // 外壳
+            // 描边沿路径两侧展开：路径向内缩半个线宽，外缘完整落在 30×14dp
+            // 画布内，既不会被裁掉，也不会额外侵占固定 20dp 状态行之外的空间。
+            drawRoundRect(
+                color = BatteryOutline,
+                topLeft = Offset(halfStroke, halfStroke),
+                size = Size(bodyWidth - strokeWidth, size.height - strokeWidth),
+                cornerRadius = CornerRadius(corner, corner),
+                style = Stroke(width = strokeWidth),
+            )
+
+            // 正极凸角仅占右侧预留区，不参与电池主体和数字的居中计算。
+            drawRoundRect(
+                color = BatteryOutline,
+                topLeft = Offset(bodyWidth + nubGap, (size.height - nubHeight) / 2f),
+                size = Size(nubWidth, nubHeight),
+                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
+            )
+
+            // 内部填充：从壳体外缘向内避开完整描边，再留 1dp 间隔。
+            val inset = strokeWidth + 1.dp.toPx()
+            val fillMaxWidth = (bodyWidth - inset * 2).coerceAtLeast(0f)
+            val fillWidth = fillMaxWidth * (percent.coerceIn(0, 100) / 100f)
+
+            if (fillWidth > 0f) {
                 drawRoundRect(
-                    color = BatteryOutline,
-                    size = Size(bodyWidth, size.height),
-                    cornerRadius = CornerRadius(corner, corner),
-                    style = Stroke(width = strokeWidth),
+                    color = if (charging) ChargeGreen else Color.White.copy(alpha = 0.9f),
+                    topLeft = Offset(inset, inset),
+                    size = Size(fillWidth, (size.height - inset * 2).coerceAtLeast(0f)),
+                    cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx()),
                 )
-
-                // 正极的小凸起
-                drawRoundRect(
-                    color = BatteryOutline,
-                    topLeft = Offset(bodyWidth + 1.dp.toPx(), (size.height - nubHeight) / 2f),
-                    size = Size(nubWidth, nubHeight),
-                    cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
-                )
-
-                // 内部填充：充电时绿色，平时白色
-                val inset = strokeWidth + 1.dp.toPx()
-                val fillMaxWidth = (bodyWidth - inset * 2).coerceAtLeast(0f)
-                val fillWidth = fillMaxWidth * (percent.coerceIn(0, 100) / 100f)
-
-                if (fillWidth > 0f) {
-                    drawRoundRect(
-                        color = if (charging) ChargeGreen else Color.White.copy(alpha = 0.9f),
-                        topLeft = Offset(inset, inset),
-                        size = Size(fillWidth, size.height - inset * 2),
-                        cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx()),
-                    )
-                }
             }
 
-            // 百分比画在电池里面
-            Text(
-                text = percent.toString(),
-                color = Color.White,
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Medium,
+            // 可见字形边界的中心对齐主体中心；正极的额外宽度、字体上下留白、
+            // 数字自身的左右边距都不影响位置，1/2/3 位电量使用同一居中规则。
+            drawContext.canvas.nativeCanvas.drawText(
+                label,
+                bodyWidth / 2f - numberBounds.exactCenterX(),
+                size.height / 2f - numberBounds.exactCenterY(),
+                numberPaint,
             )
         }
     }

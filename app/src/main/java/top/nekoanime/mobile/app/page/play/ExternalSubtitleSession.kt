@@ -1,6 +1,7 @@
 package top.nekoanime.mobile.app.page.play
 
 import android.net.Uri
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -11,6 +12,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
@@ -77,6 +79,9 @@ class ExternalSubtitleSession(private val context: android.content.Context) {
     private var generation = 0L
     private val available = MutableStateFlow<Set<String>>(emptySet())
     val availableTrackIds = available.asStateFlow()
+    // 默认项按接口列表顺序确定；前面的字幕仍在下载时保持为空，避免被较快返回的后项抢占。
+    private val defaultTrack = MutableStateFlow<String?>(null)
+    val defaultTrackId = defaultTrack.asStateFlow()
 
     /** 本集是否已自动选轨或由用户选择/关闭；跟随返回栈保存，仅在主线程访问。 */
     var subtitleChoiceMade = false
@@ -98,8 +103,13 @@ class ExternalSubtitleSession(private val context: android.content.Context) {
                 SubtitleEntry("neko-external:$mediaId:$index", subtitle, mime)
             }
         }
-        val video = DefaultMediaSourceFactory(context).createMediaSource(
-            MediaItem.Builder().setUri(url).setMediaId(mediaId).build(),
+        // 原视频仅向播放器暴露音频和视频轨，容器内嵌字幕不会进入选轨或渲染链路。
+        // 外挂在过滤之后单独合并，因此仍使用原生字幕渲染器且不影响音视频播放。
+        val video = FilteringMediaSource(
+            DefaultMediaSourceFactory(context).createMediaSource(
+                MediaItem.Builder().setUri(url).setMediaId(mediaId).build(),
+            ),
+            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO),
         )
         val sources = entries.map { entry ->
             val configuration = MediaItem.SubtitleConfiguration.Builder(Uri.parse(entry.subtitle.url))
@@ -107,7 +117,8 @@ class ExternalSubtitleSession(private val context: android.content.Context) {
                 .setMimeType(entry.mime)
                 .setLanguage(entry.subtitle.language)
                 .setLabel(entry.subtitle.label.ifBlank { entry.subtitle.language ?: "外挂字幕" } + "（外挂）")
-                .setSelectionFlags(if (entry.subtitle.isDefault) C.SELECTION_FLAG_DEFAULT else 0)
+                // 不采用后端 default 标记或语言偏好；由会话按列表顺序明确选中第一条可用外挂。
+                .setSelectionFlags(0)
                 .build()
             SingleSampleMediaSource.Factory(DataSource.Factory { SubtitleDataSource(entry.bytes) })
                 .setTreatLoadErrorsAsEndOfStream(true)
@@ -126,17 +137,36 @@ class ExternalSubtitleSession(private val context: android.content.Context) {
                     coroutineContext.ensureActive()
                     entry.bytes.complete(bytes)
                     synchronized(available) {
-                        if (token == generation) available.value = available.value + entry.trackId
+                        if (token == generation) {
+                            available.value = available.value + entry.trackId
+                            // 记录成功轨道便于真机核对下载，不记录媒体地址或账号信息。
+                            Log.d("NekoSubtitle", "外挂已就绪 track=${entry.trackId}")
+                        }
                     }
                 } catch (cancelled: CancellationException) {
                     entry.bytes.complete(null)
                     throw cancelled
-                } catch (_: Exception) {
-                    // 不记录带签名的字幕 URL，也不让字幕错误进入播放器错误通道。
+                } catch (failure: Exception) {
+                    // 只记录轨道编号和失败类型，不输出可能含签名 URL 的异常正文；字幕失败不阻断视频。
+                    Log.w("NekoSubtitle", "外挂加载失败 track=${entry.trackId} type=${failure.javaClass.simpleName}")
                     entry.bytes.complete(null)
+                } finally {
+                    // 每次下载结束都重新检查有序默认项；只有前面的请求全部结束后才允许选择后项。
+                    synchronized(available) {
+                        if (token == generation) defaultTrack.value = firstAvailableSubtitleId(entries)
+                    }
                 }
             }
         }
+    }
+
+    /** 按接口顺序跳过已失败项；遇到仍在下载的前项就等待，优先选中最前面的成功外挂。 */
+    private fun firstAvailableSubtitleId(orderedEntries: List<SubtitleEntry>): String? {
+        for (entry in orderedEntries) {
+            if (!entry.bytes.isDone) return null
+            if (entry.bytes.getNow(null) != null) return entry.trackId
+        }
+        return null
     }
 
     /** 取消上一集所有网络请求并解除字幕加载器等待，防止旧结果污染新集。 */
@@ -144,6 +174,8 @@ class ExternalSubtitleSession(private val context: android.content.Context) {
         synchronized(available) {
             generation++
             available.value = emptySet()
+            // 切集后默认项也必须失效，旧集下载完成时不能将其重新写回。
+            defaultTrack.value = null
         }
         jobs.forEach { it.cancel() }
         entries.forEach { it.bytes.complete(null) }

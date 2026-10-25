@@ -38,7 +38,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,9 +55,14 @@ import top.nekoanime.mobile.app.component.CoverImage
 import top.nekoanime.mobile.app.component.appendDistinct
 import top.nekoanime.mobile.app.component.rememberSaveableList
 import top.nekoanime.mobile.app.component.HistorySkeleton
-import top.nekoanime.mobile.app.config.ConfigLoader
 import top.nekoanime.mobile.app.data.repository.UserRepository
 import top.nekoanime.mobile.app.model.entity.WatchHistory
+import top.nekoanime.mobile.app.logging.AppLog
+import top.nekoanime.mobile.app.model.history.HistoryFooterKey
+import top.nekoanime.mobile.app.model.history.groupHistoryByDay
+import top.nekoanime.mobile.app.model.history.historyDayTitle
+import top.nekoanime.mobile.app.model.history.historyRecordKey
+import top.nekoanime.mobile.app.model.history.isHistoryEndVisible
 
 /** 历史记录每页条数（跟首页继续观看一个量级） */
 private const val HistoryPageSize = 20
@@ -100,6 +104,9 @@ fun HistoryScreen(
     var hasMore by rememberSaveable { mutableStateOf(true) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    // 分组与标题依赖当前本地日历，系统改时区或跨午夜时会自动重算。
+    val dateContext = rememberHistoryDateContext()
+    val historyGroups = groupHistoryByDay(items, dateContext)
 
     BackHandler { onBack() }
 
@@ -120,8 +127,14 @@ fun HistoryScreen(
                 page = nextPage
                 hasMore = list.size >= HistoryPageSize
                 error = null
+                // 仅记分页与数量，便于排查追加异常；不输出作品名、观看时间或用户身份。
+                AppLog.d("History", "历史加载成功 page=$nextPage received=${list.size} total=${items.size} hasMore=$hasMore")
             }
-            .onFailure { error = it.message ?: "加载失败" }
+            .onFailure {
+                error = it.message ?: "加载失败"
+                // 统一日志入口只保留异常类型，不把服务端返回文本写入日志。
+                AppLog.w("History", "历史加载失败 page=$nextPage", it)
+            }
 
         loading = false
     }
@@ -133,14 +146,21 @@ fun HistoryScreen(
         }
     }
 
-    // 滚到底部（最后一条进入视野）才自动加载下一页
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
-            .collect { lastVisible ->
-                if (items.isNotEmpty() && lastVisible >= items.size - 1) {
-                    loadNextPage()
-                }
-            }
+    // 标题也是 LazyColumn 项：只按最后一条记录/页脚的 key 判断触底，不再混用原始记录数。
+    // 分组、追加页或加载状态改变后重新核对，短列表无需滚动也能继续填满屏幕。
+    LaunchedEffect(listState, historyGroups) {
+        val lastRecordKey = historyGroups.lastOrNull()?.records?.lastOrNull()?.let(::historyRecordKey)
+        snapshotFlow {
+            // 加载状态放在观察表达式中，不能作为 effect key，否则刚置 loading 就会取消自身请求。
+            val reachedEnd = isHistoryEndVisible(listState.layoutInfo.visibleItemsInfo.map { it.key }, lastRecordKey) &&
+                !loading && hasMore && error == null
+            // 页号也参与观察：整页都被去重时，仍可接着加载后续页。
+            reachedEnd to page
+        }.collect { (reachedEnd, _) ->
+            // 请求失败后等用户重试或下拉刷新，避免页脚可见时反复自动请求。
+            // 网络请求归页面作用域持有，时区变化导致分组 effect 重启时，不会取消请求并遗留 loading。
+            if (reachedEnd) scope.launch { loadNextPage() }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -205,7 +225,9 @@ fun HistoryScreen(
                         fontSize = 14.sp,
                     )
                     if (error != null) {
-                        TextButton(onClick = { error = null; hasMore = true }) { Text("重试") }
+                        TextButton(onClick = {
+                            scope.launch { error = null; hasMore = true; loadNextPage() }
+                        }) { Text("重试") }
                     }
                 }
             }
@@ -216,17 +238,30 @@ fun HistoryScreen(
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(items, key = { "${it.animeId}-${it.episodeId}" }) { history ->
-                    HistoryRow(
-                        history = history,
-                        onClick = {
-                            onOpenEpisode(history.animeId, history.episodeId, history.progressSeconds)
-                        },
-                    )
+                historyGroups.forEach { group ->
+                    // 标题使用日期键，午夜只改变文案，避免列表位置因「今天/昨天」改名而跳动。
+                    item(key = "history:day:${group.day}", contentType = "history-day") {
+                        Text(
+                            text = historyDayTitle(group.day, dateContext),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                        )
+                    }
+                    items(group.records, key = ::historyRecordKey, contentType = { "history-record" }) { history ->
+                        HistoryRow(
+                            history = history,
+                            onClick = {
+                                // 只记跳转目标 ID，便于串联播放页链路，不记录标题或观看进度。
+                                AppLog.d("History", "打开历史 animeId=${history.animeId} episodeId=${history.episodeId}")
+                                onOpenEpisode(history.animeId, history.episodeId, history.progressSeconds)
+                            },
+                        )
+                    }
                 }
 
-                // 底部状态：加载中 / 已经没有下一页了
-                item {
+                // 底部状态有独立 key，触底检测可以识别它而不受分组标题数量影响。
+                item(key = HistoryFooterKey, contentType = "history-footer") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -248,6 +283,11 @@ fun HistoryScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+
+                            // 翻页失败时在页脚提供手动重试，阻止自动重试后仍有明确的恢复入口。
+                            error != null -> TextButton(onClick = {
+                                scope.launch { error = null; loadNextPage() }
+                            }) { Text("加载失败，点击重试") }
 
                             !hasMore -> Text(
                                 text = "已经到底啦",

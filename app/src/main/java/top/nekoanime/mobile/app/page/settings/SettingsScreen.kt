@@ -54,6 +54,8 @@ import top.nekoanime.mobile.app.model.dto.AppUpdateDto
 import top.nekoanime.mobile.app.page.settings.component.AvatarCropDialog
 import top.nekoanime.mobile.app.service.UpdateService
 import top.nekoanime.mobile.app.state.SessionState
+import top.nekoanime.mobile.app.logging.AppLog
+import androidx.compose.material.icons.filled.Description
 
 /**
  * 设置页。
@@ -88,7 +90,8 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     // 进页面读一次图片缓存大小
     LaunchedEffect(Unit) {
-        cacheSize = imageLoader.diskCache?.size ?: 0L
+        // 缓存大小同时计入持久化日志，清除入口对应实际会删除的图片和日志数据。
+        cacheSize = (imageLoader.diskCache?.size ?: 0L) + AppLog.sizeBytes()
     }
 
     // 相册选图（系统照片选择器，不需要存储权限）→ 选完直接进裁剪弹窗
@@ -167,10 +170,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                 trailing = formatSize(cacheSize),
                 onClick = {
                     scope.launch {
-                        imageLoader.memoryCache?.clear()
-                        imageLoader.diskCache?.clear()
-                        cacheSize = 0L
-                        message = "缓存已清除"
+                        // 清理失败必须提示，只有图片与持久化日志均完成清理后才报告成功。
+                        runCatching {
+                            imageLoader.memoryCache?.clear()
+                            imageLoader.diskCache?.clear()
+                            AppLog.clear()
+                        }.onSuccess {
+                            cacheSize = 0L
+                            message = "缓存和日志已清除"
+                        }.onFailure {
+                            message = "清除失败，请重试"
+                        }
                     }
                 },
             )
@@ -201,6 +211,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                             .onFailure { message = "检查更新失败：${it.message}" }
 
                         checking = false
+                    }
+                },
+            )
+
+            // 日志查看是设置页最后一个操作入口，业务只依赖日志抽象而不直接调用 VLog。
+            EntryRow(
+                icon = Icons.Filled.Description,
+                title = "查看日志",
+                trailing = "最近 7 天",
+                onClick = {
+                    scope.launch {
+                        runCatching { AppLog.openViewer(context) }
+                            .onFailure { message = "暂时无法打开日志" }
                     }
                 },
             )

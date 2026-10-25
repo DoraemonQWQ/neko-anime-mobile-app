@@ -1,5 +1,6 @@
 package top.nekoanime.mobile.app.page.play.component.player
 
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -24,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Fullscreen
@@ -113,7 +116,7 @@ private val NoInsets = WindowInsets(0, 0, 0, 0)
  * @param onHome 返回主页
  * @param modifier 由播放器给出的布局约束（一般是整块播放区域）
  * @param episodeDrawer 打开选集抽屉；为 null 表示当前不显示选集按钮（非全屏时不显示，选集列表就在播放器下面）
- * @param subtitleDrawer 打开字幕抽屉；为 null 表示当前文件没有内嵌字幕轨，不显示字幕按钮
+ * @param subtitleDrawer 打开外挂字幕抽屉；为 null 表示接口未声明外挂，不显示字幕按钮
  * @param previousEpisode 上一集；为 null 就整块隐藏（非全屏不显示，或者已经是第一集）
  * @param nextEpisode 下一集；为 null 就整块隐藏（非全屏不显示，或者已经是最后一集）
  * @param onUserInteraction 点控制栏上的按钮（一次性操作）：控制栏自动隐藏重新计时
@@ -138,6 +141,7 @@ fun PlayerControls(
     onTogglePlay: (() -> Unit)?,
     onSeek: (Long) -> Unit,
     onToggleSpeed: () -> Unit,
+    onOpenSettings: () -> Unit,
     onToggleLock: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
@@ -154,6 +158,8 @@ fun PlayerControls(
     onSeekPreview: (Long) -> Unit = {},
     onSeekPreviewEnd: () -> Unit = {},
     topBarOnly: Boolean = false,
+    // 使用实际可见状态控制标题动画，淡出期间也立即取消，重新显示时从头停留三秒。
+    controlsShown: Boolean = true,
 ) {
     // 倍速按钮：不要涟漪（播放器控件追求轻量）
     val speedInteraction = remember { MutableInteractionSource() }
@@ -177,7 +183,8 @@ fun PlayerControls(
     // 安全区：全屏时系统栏虽然隐藏了，但刘海/挖孔与手势区的 inset 还在，按方向让开。
     // 背景渐变是画在外层的，不受这个 padding 影响，所以"按钮让开、底色照旧铺满"。
     val topInsets = if (fullscreen) {
-        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+        // 全屏系统栏已隐藏，顶部不再加竖屏残留 inset；只让开左右真实挖孔，防首次旋转顶栏下沉。
+        WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)
     } else {
         NoInsets
     }
@@ -213,7 +220,8 @@ fun PlayerControls(
                     if (fullscreen) {
                         PlayerStatusBar(
                             modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                // 时间按整屏居中，电量在组件内单独避让挖孔；不叠加顶部系统栏高度。
+                                .padding(horizontal = 12.dp),
                         )
                     }
 
@@ -257,12 +265,13 @@ fun PlayerControls(
                             }
                         }
 
-                        // 标题（番剧名 | 剧集名 | 集数）太长时自动滚动：
-                        // 进来先停 10 秒，滚完再停 10 秒，放得下就完全不动
+                        // 标题超宽时往返滚动，两端各停三秒；控制器每次重新显示都回到头部等待。
+                        // 放得下时保持静止，锁定或隐藏后取消动画。
                         AutoScrollTitle(
                             text = title,
                             color = Color.White,
                             fontSize = 13.sp,
+                            active = controlsShown && !locked,
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 4.dp),
@@ -382,7 +391,7 @@ fun PlayerControls(
                                     onValueChangeFinished = {
                                         // 松手才真正跳转，并且立刻结束本地拖动状态
                                         val target = dragMs
-                                        android.util.Log.i("NekoPlayer", "进度条松手 target=${target / 1000}s")
+                                        Log.i("NekoPlayer", "进度条松手 target=${target / 1000}s")
                                         dragging = false
                                         onInteractionEnd()
                                         onSeekPreviewEnd()
@@ -437,7 +446,7 @@ fun PlayerControls(
                                 )
                             }
 
-                            // 字幕：文件带内嵌字幕轨时才出现，点开是底部弹出的小抽屉
+                            // 接口存在外挂时显示字幕按钮，加载期间也可打开抽屉，不依赖内嵌轨。
                             if (subtitleDrawer != null) {
                                 IconButton(
                                     onClick = {
@@ -471,6 +480,23 @@ fun PlayerControls(
                                         modifier = Modifier.size(ControlIconSize),
                                     )
                                 }
+                            }
+
+                            // 设置位于选集与全屏之间；共用 36dp 点击框，按图标路径留白校准实际视觉轮廓。
+                            IconButton(
+                                onClick = {
+                                    onUserInteraction()
+                                    onOpenSettings()
+                                },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Settings,
+                                    contentDescription = "播放设置",
+                                    tint = Color.White,
+                                    // 齿轮路径比选集/全屏更满，略缩绘制框使实际图形轮廓看起来等大。
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
 
                             IconButton(

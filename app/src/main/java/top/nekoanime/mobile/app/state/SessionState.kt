@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import top.nekoanime.mobile.app.data.local.UserSession
 import top.nekoanime.mobile.app.data.repository.UserRepository
 import top.nekoanime.mobile.app.model.entity.UserProfile
+import top.nekoanime.mobile.app.logging.AppLog as Log
 
 /**
  * 全局登录态。
@@ -62,6 +63,9 @@ object SessionState {
         val session = UserSession(context)
         store = session
         loggedIn = session.restoreToken() != null
+        Log.i("NekoSession", if (loggedIn) "已恢复本地登录态" else "当前未登录")
+        // 新进程或重新初始化会话时丢弃旧历史，首页恢复可见后再按当前账号读取。
+        ContinueWatchingState.clear()
     }
 
     /**
@@ -70,8 +74,13 @@ object SessionState {
      * @param token 登录接口返回的 JWT
      */
     suspend fun onLoggedIn(token: String) {
+        // 仅记录会话事件，不记录 JWT 或用户资料字段。
+        Log.i("NekoSession", "登录成功，建立新会话")
         store?.saveToken(token)
+        // 登录建立新会话，先隔离旧请求，再立即加载该账号的继续观看，不等待头像资料接口。
+        ContinueWatchingState.clear()
         loggedIn = true
+        ContinueWatchingState.refresh()
         refreshProfile()
     }
 
@@ -79,8 +88,12 @@ object SessionState {
      * 退出登录。
      */
     fun logout() {
+        // 退出与继续观看清理作为同一业务边界记录，不输出用户身份信息。
+        Log.i("NekoSession", "退出登录，清除会话数据")
         store?.clear()
         loggedIn = false
+        // 与登录态同步清空历史，即使首页 Tab 已离开组合，也不会保留可恢复的账号数据。
+        ContinueWatchingState.clear()
         profile = null
     }
 }

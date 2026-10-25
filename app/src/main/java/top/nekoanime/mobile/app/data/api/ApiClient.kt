@@ -1,6 +1,6 @@
 package top.nekoanime.mobile.app.data.api
 
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -69,11 +69,11 @@ private val http = OkHttpClient.Builder()
      * @param detail 后端返回的说明（可为空字符串）
      * @returns 给用户看的提示：优先用后端的说明，其次按状态码给通用文案
      */
-    private fun failureMessage(path: String, code: Int, detail: String = ""): String {
+    private fun failureMessage(path: String, code: Int, detail: String = "", method: String = "GET"): String {
+        // 响应原文可能包含密码或令牌；只记录方法、路径和状态码，界面仍可使用后端提示。
         val text = detail.trim().take(MaxErrorDetailLength)
-
-        Log.w("NekoApi", "请求失败 $path -> HTTP $code${if (text.isEmpty()) "" else "：$text"}")
-
+        val safePath = path.toHttpUrlOrNull()?.encodedPath ?: path.substringBefore('?')
+        Log.w("NekoApi", "$method $safePath -> HTTP $code")
         return text.ifEmpty { statusMessage(code) }
     }
 
@@ -150,14 +150,14 @@ private val http = OkHttpClient.Builder()
                 val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error(failureMessage(path, response.code, body))
+                    error(failureMessage(path, response.code, body, request.method))
                 }
 
                 json.decodeFromString(serializer, body)
             }
         }.onFailure { error ->
             // 打一条日志就够了：网络问题在界面上通常只表现为"这块数据没出来"
-            Log.w("NekoApi", "请求失败 $path -> ${error.message}")
+            Log.w("NekoApi", "请求失败 ${path.substringBefore('?')}", error)
         }
     }
 
@@ -185,7 +185,7 @@ private val http = OkHttpClient.Builder()
 
                 json.decodeFromString(serializer, body)
             }
-        }.onFailure { error -> Log.w("NekoApi", "请求失败 $url -> ${error.message}") }
+        }.onFailure { error -> Log.w("NekoApi", "GET ${url.toHttpUrlOrNull()?.encodedPath.orEmpty()} 请求失败", error) }
     }
 
     /**
@@ -228,7 +228,7 @@ private val http = OkHttpClient.Builder()
                 val location = response.header("Location")
 
                 if (location.isNullOrBlank()) {
-                    error(failureMessage(path, response.code, response.body?.string().orEmpty()))
+                    error(failureMessage(path, response.code, response.body?.string().orEmpty(), request.method))
                 }
 
                 location
@@ -258,13 +258,13 @@ private val http = OkHttpClient.Builder()
                 val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error(failureMessage(path, response.code, body))
+                    error(failureMessage(path, response.code, body, request.method))
                 }
 
                 json.decodeFromString(serializer, body)
             }
         }.onFailure { error ->
-            Log.w("NekoApi", "请求失败 $path -> ${error.message}")
+            Log.w("NekoApi", "请求失败 ${path.substringBefore('?')}", error)
         }
     }
 
@@ -303,13 +303,13 @@ private val http = OkHttpClient.Builder()
                 val text = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    error(failureMessage(path, response.code, text))
+                    error(failureMessage(path, response.code, text, request.method))
                 }
 
                 text.trim()
             }
         }.onFailure { error ->
-            Log.w("NekoApi", "请求失败 $path -> ${error.message}")
+            Log.w("NekoApi", "请求失败 ${path.substringBefore('?')}", error)
         }
     }
 
@@ -325,6 +325,8 @@ private val http = OkHttpClient.Builder()
         path: String,
         body: B,
         bodySerializer: SerializationStrategy<B>,
+        // 在调用线程捕获会话令牌，避免切到 IO 线程或模拟延迟期间切换账号后借用新账号身份。
+        requestToken: String? = authToken,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             applyMockDelay()
@@ -335,16 +337,17 @@ private val http = OkHttpClient.Builder()
             val request = Request.Builder()
                 .url(url)
                 .post(bodyText.toRequestBody(JsonMediaType))
-                .apply { authToken?.let { header("Authorization", "Bearer $it") } }
+                // 使用请求发起时捕获的令牌，保证异步写入始终归属于原会话。
+                .apply { requestToken?.let { header("Authorization", "Bearer $it") } }
                 .build()
 
             http.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    error(failureMessage(path, response.code, text))
+                    error(failureMessage(path, response.code, text, request.method))
                 }
             }
-        }.onFailure { error -> Log.w("NekoApi", "请求失败 $path -> ${error.message}") }
+        }.onFailure { error -> Log.w("NekoApi", "请求失败 ${path.substringBefore('?')}", error) }
     }
 
     /**
@@ -369,6 +372,6 @@ private val http = OkHttpClient.Builder()
                         error(failureMessage(url, response.code))
                     }
                 }
-            }.onFailure { error -> Log.w("NekoApi", "直传失败 -> ${error.message}") }
+            }.onFailure { error -> Log.w("NekoApi", "PUT 直传请求失败", error) }
         }
 }

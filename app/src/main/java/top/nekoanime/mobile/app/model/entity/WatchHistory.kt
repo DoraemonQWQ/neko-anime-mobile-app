@@ -14,6 +14,7 @@ import kotlinx.serialization.Serializable
  * @param durationSeconds 这一集多长（秒）；0 表示后端没给
  * @param finished 是否已看完
  * @param coverUrl 这一集的封面（后端抽帧的 16:9 图）
+ * @param viewedAtMillis 最后观看时间点；缺失或无效为 null，不能冒充今天
  */
 @Serializable
 data class WatchHistory(
@@ -26,4 +27,6 @@ data class WatchHistory(
     val durationSeconds: Long,
     val finished: Boolean,
     val coverUrl: String,
+    // 默认值兼容此前保存的历史列表：旧状态没有时间字段，应显示为「日期未知」。
+    val viewedAtMillis: Long? = null,
 )

@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertArrayEquals
@@ -113,24 +114,56 @@ class ExternalSubtitleTest {
         assertTrue(collectSubtitleTracks(tracks, emptySet()).isEmpty())
     }
 
-    /** 下载未完成或失败的外挂不可选，内嵌字幕始终保留在同一菜单。 */
+    /** 仅已校验的 neko-external 标识可进入菜单；内嵌与尚未就绪的外挂一律隐藏。 */
     @Test
-    fun combinesEmbeddedAndReadyExternalTracks() {
+    fun collectsOnlyValidatedExternalTracks() {
         val embedded = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setLanguage("zh").build()
-        val external = embedded.buildUpon().setId("neko-external:7:0").setLabel("外挂").build()
-        val tracks = Tracks(ImmutableList.of(group(embedded), group(external)))
-        assertEquals(1, collectSubtitleTracks(tracks, emptySet()).size)
-        val available = collectSubtitleTracks(tracks, setOf("neko-external:7:0"))
-        assertEquals(2, available.size)
-        assertEquals("外挂", available[1].label)
+        val unvalidated = embedded.buildUpon().setId("neko-external:7:0").setLabel("待校验").build()
+        val validated = embedded.buildUpon().setId("neko-external:7:1").setLabel("外挂").build()
+        val tracks = Tracks(ImmutableList.of(group(embedded), group(unvalidated), group(validated)))
+
+        // Media3 即使同时回报容器内嵌轨和多个外挂，菜单也只显示会话已验证的外挂 ID。
+        assertTrue(collectSubtitleTracks(tracks, emptySet()).isEmpty())
+        val available = collectSubtitleTracks(tracks, setOf("neko-external:7:1"))
+        assertEquals(1, available.size)
+        assertEquals("外挂", available.single().label)
     }
 
-    /** 切轨使用按类型覆盖，先前选中的字幕覆盖必须被替换而不是叠加。 */
+    /** 合并媒体源添加数字子源前缀后仍应识别外挂，且绝不接受任意包含外挂字样的内嵌 ID。 */
+    @Test
+    fun recognizesExternalTracksWithMergedSourcePrefixes() {
+        val originalId = "neko-external:7:0"
+        val external = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT)
+            .setId("1:$originalId").setLabel("首条外挂").build()
+        val embedded = external.buildUpon().setId("embedded:$originalId").build()
+        val tracks = collectSubtitleTracks(
+            Tracks(ImmutableList.of(group(embedded), group(external))), setOf(originalId),
+        )
+        // 真机 Media3 回报的是 1:neko-external:*；菜单和默认选择都必须使用还原后的会话 ID。
+        assertEquals(listOf("首条外挂"), tracks.map { it.label })
+        assertEquals(originalId, top.nekoanime.mobile.app.page.play.component.player.externalSubtitleId(external))
+        assertNull(top.nekoanime.mobile.app.page.play.component.player.externalSubtitleId(embedded))
+    }
+
+    /** 没有可用外挂时，单有容器内嵌字幕也不能让字幕菜单出现。 */
+    @Test
+    fun hidesEmbeddedSubtitleWhenNoExternalTrackIsAvailable() {
+        val embedded = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setLanguage("zh").build()
+        val tracks = Tracks(ImmutableList.of(group(embedded)))
+
+        // 播放源会过滤视频容器的字幕轨；这里同时验证菜单收集器防御 Media3 意外回报内嵌轨。
+        assertTrue(collectSubtitleTracks(tracks, emptySet()).isEmpty())
+    }
+
+    /** 切轨使用按类型覆盖，第二条有效外挂替换第一条而非叠加。 */
     @Test
     fun nativeOverrideSelectsExactlyOneSubtitle() {
-        val first = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setId("a").build()
-        val second = first.buildUpon().setId("b").build()
-        val tracks = collectSubtitleTracks(Tracks(ImmutableList.of(group(first), group(second))), emptySet())
+        val first = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setId("neko-external:7:0").build()
+        val second = first.buildUpon().setId("neko-external:7:1").build()
+        val tracks = collectSubtitleTracks(
+            Tracks(ImmutableList.of(group(first), group(second))),
+            setOf("neko-external:7:0", "neko-external:7:1"),
+        )
         val parameters = TrackSelectionParameters.Builder(RuntimeEnvironment.getApplication())
             .setOverrideForType(tracks[0].override)
             .setOverrideForType(tracks[1].override)
@@ -140,13 +173,18 @@ class ExternalSubtitleTest {
         assertEquals(listOf(0), parameters.overrides.values.single().trackIndices)
     }
 
-    /** 不再按轨道顺序猜测简繁体，重复中文名称仅编号。 */
+    /** 不再按轨道顺序猜测简繁体，已验证外挂的重复中文名称仅编号。 */
     @Test
-    fun duplicateChineseTracksAreNotGuessedAsSimplifiedAndTraditional() {
-        val format = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setLanguage("chi").build()
+    fun duplicateChineseExternalTracksAreNotGuessedAsSimplifiedAndTraditional() {
+        val format = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).setLanguage("chi")
+        val firstId = "neko-external:7:0"
+        val secondId = "neko-external:7:1"
         val tracks = collectSubtitleTracks(
-            Tracks(ImmutableList.of(group(format), group(format.buildUpon().setId("second").build()))),
-            emptySet(),
+            Tracks(ImmutableList.of(
+                group(format.setId(firstId).build()),
+                group(format.setId(secondId).build()),
+            )),
+            setOf(firstId, secondId),
         )
         assertEquals(listOf("中文 1", "中文 2"), tracks.map { it.label })
     }
@@ -205,6 +243,57 @@ class ExternalSubtitleTest {
             assertNull(request!!.getHeader("Authorization"))
             assertEquals("7", player.currentMediaItem!!.mediaId)
             assertNull(player.playerError)
+        }
+    }
+
+    /** 较快完成的后项不能抢占仍在下载的接口首项；首项成功后默认项才落到首项。 */
+    @Test
+    fun defaultTrackWaitsForEarlierSubtitleEvenWhenLaterOneFinishesFirst() {
+        withSession { server, session, player ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse =
+                    when (request.path) {
+                        "/first.vtt" -> MockResponse().setBody(validVtt).setBodyDelay(700, TimeUnit.MILLISECONDS)
+                        "/second.vtt" -> MockResponse().setBody(validVtt)
+                        else -> MockResponse().setResponseCode(404)
+                    }
+            }
+            val subtitles = listOf(subtitle(server, "/first.vtt"), subtitle(server, "/second.vtt"))
+            session.setSource(player, "https://example.test/video.mp4", subtitles, "7")
+
+            // 等后项已下载成功，再确认尚未完成的首项仍阻止默认选择被后项抢先占位。
+            await { "neko-external:7:1" in session.availableTrackIds.value }
+            assertNull(session.defaultTrackId.value)
+            await { session.defaultTrackId.value == "neko-external:7:0" }
+            assertEquals(setOf("neko-external:7:0", "neko-external:7:1"), session.availableTrackIds.value)
+        }
+    }
+
+    /** 首项下载失败后按接口顺序跳过失败项，选择其后第一个已校验字幕。 */
+    @Test
+    fun defaultTrackFallsBackAfterFirstSubtitleFails() {
+        withSession { server, session, player ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse =
+                    when (request.path) {
+                        // 返回 200 但延迟提供损坏内容，让首项确实处于读取/校验中，验证后项不能抢先成为默认。
+                        "/first.vtt" -> MockResponse().setBody("not a WebVTT file").setBodyDelay(700, TimeUnit.MILLISECONDS)
+                        "/second.vtt" -> MockResponse().setBody(validVtt)
+                        else -> MockResponse().setResponseCode(404)
+                    }
+            }
+            session.setSource(
+                player,
+                "https://example.test/video.mp4",
+                listOf(subtitle(server, "/first.vtt"), subtitle(server, "/second.vtt")),
+                "7",
+            )
+
+            // 第二项先成功也不能越过未决首项；首项失败结束后第二项成为默认轨。
+            await { "neko-external:7:1" in session.availableTrackIds.value }
+            assertNull(session.defaultTrackId.value)
+            await { session.defaultTrackId.value == "neko-external:7:1" }
+            assertEquals(setOf("neko-external:7:1"), session.availableTrackIds.value)
         }
     }
 

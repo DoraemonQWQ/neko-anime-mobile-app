@@ -131,4 +131,6 @@ private fun UserHistoryDto.toHistory(): WatchHistory = WatchHistory(
     // 后端 view_status：1 = 看完
     finished = viewStatus == 1,
     coverUrl = cover,
+    // 保留绝对时间点，页面才能在手机切换时区后重新分组；无效日期保持未知。
+    viewedAtMillis = top.nekoanime.mobile.app.model.history.parseHistoryTimestamp(updateDate),
 )
