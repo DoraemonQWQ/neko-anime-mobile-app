@@ -450,21 +450,38 @@ fun NekoPlayer(
     }
 
     LaunchedEffect(episode.id, url, subtitleTracks, defaultExternalId) {
-        // 换源 effect 与选轨 effect 可能同帧启动，绝不把旧集 TrackGroup 应用到新源。
-        val sourceMatches = player.currentMediaItem?.mediaId == episode.id.toString() &&
-            player.currentMediaItem?.localConfiguration?.uri?.toString() == url
-        if (sourceMatches && currentTracks == player.currentTracks &&
-            !subtitleSession.subtitleChoiceMade && subtitleTracks.isNotEmpty()
-        ) {
+        // 换源 effect 与选轨 effect 可能同帧启动；subtitleTracks / defaultExternalId 是本次组合的快照，
+        // 切集瞬间仍是上一集的值。所以只在确认播放器已经是这一集之后，再现场读取会话默认项和实际轨道，
+        // 绝不把上一集的 TrackGroup 设成新源的覆盖（那样会白白消耗掉"未选择"状态，新集再也不自动选轨）。
+        val currentItem = player.currentMediaItem
+        val sourceMatches = currentItem?.mediaId == episode.id.toString() &&
+            currentItem?.localConfiguration?.uri?.toString() == url
+        if (sourceMatches && !subtitleSession.subtitleChoiceMade) {
             // 只按会话指定的首条外挂自动选中；未准备好时继续等待，不回退到其他语言或默认标记。
-            val track = subtitleTracks.firstOrNull {
-                externalSubtitleId(it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())) == defaultExternalId
-            } ?: return@LaunchedEffect
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(track.override)
-                .build()
-            subtitleSession.subtitleChoiceMade = true
+            val defaultId = subtitleSession.defaultTrackId.value
+            if (defaultId != null) {
+                val liveTracks = collectSubtitleTracks(
+                    player.currentTracks,
+                    subtitleSession.availableTrackIds.value,
+                )
+                val track = liveTracks.firstOrNull {
+                    externalSubtitleId(it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())) == defaultId
+                }
+                if (track != null) {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(track.override)
+                        .build()
+                    // 外挂可能比视频晚到（网络慢或首条失败后才轮到下一条），也可能是暂停状态下才就绪；
+                    // 原地 seek 一下让字幕渲染器立刻按当前位置补一帧，避免"选了却不出字"。
+                    if (!player.playWhenReady) {
+                        player.seekTo(player.currentPosition)
+                    }
+                    subtitleSession.subtitleChoiceMade = true
+                    // 只记剧集编号，不输出带签名的字幕地址，便于真机核对切集后的自动选轨。
+                    Log.d("NekoSubtitle", "自动选中外挂字幕 episode=${episode.id}")
+                }
+            }
         }
         // 接口未声明外挂时才收起面板；下载过程中可保持打开，等待可用列表自动更新。
         if (subtitles.isEmpty()) subtitleDrawerOpen = false
