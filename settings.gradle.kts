@@ -16,6 +16,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // VLog 官方发布在 JitPack，仅允许该日志库坐标使用此仓库，避免影响其他依赖解析。
+        maven("https://jitpack.io") { content { includeGroup("com.github.oooo7777777") } }
     }
 }
 

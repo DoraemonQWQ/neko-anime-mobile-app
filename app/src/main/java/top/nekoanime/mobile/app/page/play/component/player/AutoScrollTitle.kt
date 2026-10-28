@@ -5,6 +5,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -12,41 +13,37 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-/** 每段开头（以及回到起点后）停留多久 */
-private const val DefaultPauseMillis = 10_000L
+/** 首次显示、滚到尾部和回到头部时，都停留 3 秒。 */
+private const val DefaultPauseMillis = 3_000L
 
-/** 滚动速度：每秒多少像素（按屏幕密度换算成 px/s 由调用方给） */
-private const val DefaultPixelsPerSecond = 60f
-
-/** 一次滚动最少用时，避免文字只超出一点点时"唰"一下 */
-private const val MinScrollMillis = 800L
+/** 默认每秒移动 30dp，换算成像素后，高低密度屏幕的视觉速度保持一致。 */
+private const val DefaultDpPerSecond = 30f
 
 /**
- * 过长的标题自动滚动。
+ * 单行标题只有真实宽度超过可用宽度时，才在头尾之间匀速往返。
  *
- * @description 节奏与 B 站 一致：**先停 10 秒**，再匀速滚到末尾，停下再等 10 秒，
- * 然后瞬回起点重新开始。文字放得下就完全不动。
+ * 显示后从头部等待 3 秒，滚到尾部等待 3 秒，再反向滚回头部，重复此过程。
+ * 停留使用挂起等待，只在实际移动时请求动画帧；离开组合或隐藏控制器会取消动画。
  *
- * 为什么不用 `Modifier.basicMarquee`：它内部是常驻的无限动画，UI 永远不会进入 idle，
- * 用 uiautomator / Espresso 做自动化时会一直等不到空闲（跑马灯也确实没必要一直占着帧）。
- * 这里的实现只有真正在滚的那几秒会请求帧，停留期间完全是静止的。
- *
- * @param text 要显示的文本（单行、不换行）
- * @param modifier 布局约束
- * @param color 文字颜色
- * @param fontSize 字号（用 Sp 传进来，内部按密度换算）
- * @param pauseMillis 每段停留时长
- * @param pixelsPerSecond 滚动速度（px/s）
+ * @param text 要显示的标题，始终按单行测量和绘制。
+ * @param modifier 标题容器的可用宽度及其他布局约束。
+ * @param color 文字颜色。
+ * @param fontSize 文字字号，通常使用 sp。
+ * @param pauseMillis 首次显示及每次抵达头尾后的停留时长，默认 3 秒。
+ * @param pixelsPerSecond 滚动速度，单位 px/s；默认按当前密度换算为 30dp/s。
+ * @param active 传入控制器实际可见状态；false 时取消并归零，再次变为 true 时重新等待。
  */
 @Composable
 fun AutoScrollTitle(
@@ -55,38 +52,48 @@ fun AutoScrollTitle(
     color: Color = Color.White,
     fontSize: TextUnit,
     pauseMillis: Long = DefaultPauseMillis,
-    pixelsPerSecond: Float = DefaultPixelsPerSecond,
+    pixelsPerSecond: Float = DefaultDpPerSecond * LocalDensity.current.density,
+    active: Boolean = true,
 ) {
+    val density = LocalDensity.current
     var containerWidth by remember { mutableIntStateOf(0) }
-    var textWidth by remember { mutableIntStateOf(0) }
-
-    // 需要滚动的距离：文字比容器宽多少
+    // 文本或字号、密度变化时，先丢弃旧测量，避免用上一条标题的宽度启动新动画。
+    var textWidth by remember(text, fontSize, density.density, density.fontScale) {
+        mutableIntStateOf(0)
+    }
     val distance = (textWidth - containerWidth).coerceAtLeast(0)
 
-    // 滚动动画：offsetPx 每帧更新（放在 offset{} 里读，不会因此触发重组）
-    val scroll = remember { Animatable(0f) }
+    // 这些输入变化就直接使用新的零位动画状态，首帧也不会残留上一轮的偏移。
+    // 宽度本身作为 key，即便新的溢出距离恰好相同，也会重新等待完整停留时间。
+    val scroll = remember(
+        text, fontSize, density.density, density.fontScale,
+        containerWidth, textWidth, active,
+    ) { Animatable(0f) }
 
-    LaunchedEffect(text, distance, containerWidth, pauseMillis, pixelsPerSecond) {
+    LaunchedEffect(scroll, pauseMillis, pixelsPerSecond) {
         scroll.snapTo(0f)
-
-        if (distance <= 0) {
+        // 隐藏、尚未完成布局、文本放得下或速度无效时，不创建循环等待任务。
+        if (!active || containerWidth <= 0 || distance <= 0 ||
+            !pixelsPerSecond.isFinite() || pixelsPerSecond <= 0f
+        ) {
             return@LaunchedEffect
         }
 
-        val durationMillis = (distance / pixelsPerSecond * 1000f).toLong().coerceAtLeast(MinScrollMillis)
+        // 距离和速度都使用 px，保持正反两个方向同速；仅限制 tween 能接受的时长范围。
+        // 不设固定最短滚动时长，否则只溢出几像素时会比其他标题明显更慢。
+        val durationMillis = (distance.toDouble() / pixelsPerSecond * 1_000)
+            .coerceIn(1.0, Int.MAX_VALUE.toDouble())
+            .roundToInt()
+        val animationSpec = tween<Float>(durationMillis = durationMillis, easing = LinearEasing)
+        val pause = pauseMillis.coerceAtLeast(0L)
 
+        // 首次显示先停头部；每一轮结束后再停头部，因此各端点都只等待一次。
+        delay(pause)
         while (true) {
-            // 先停 10 秒：进来的时候也先停，别一上来就动
-            delay(pauseMillis)
-
-            scroll.animateTo(
-                targetValue = distance.toFloat(),
-                animationSpec = tween(durationMillis = durationMillis.toInt(), easing = LinearEasing),
-            )
-
-            // 滚到底再停 10 秒，然后瞬间回到起点
-            delay(pauseMillis)
-            scroll.snapTo(0f)
+            scroll.animateTo(targetValue = distance.toFloat(), animationSpec = animationSpec)
+            delay(pause)
+            scroll.animateTo(targetValue = 0f, animationSpec = animationSpec)
+            delay(pause)
         }
     }
 
@@ -102,10 +109,14 @@ fun AutoScrollTitle(
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Visible,
+            // 无界测量后这里得到完整单行宽度，而不是被容器截断后的宽度。
             onTextLayout = { textWidth = it.size.width },
-            modifier = Modifier.offset {
-                IntOffset(-scroll.value.roundToInt(), 0)
-            },
+            modifier = Modifier
+                // 在布局阶段读取动画值，滚动的每一帧无需触发文字重组或重新测量。
+                .offset { IntOffset(-scroll.value.roundToInt(), 0) }
+                // 只放开文字自身的测量宽度；外层容器仍遵守调用方约束并裁剪溢出内容。
+                // 显式从头部对齐，防止超长文字按默认居中对齐而在初始帧丢失开头。
+                .wrapContentWidth(align = Alignment.Start, unbounded = true),
         )
     }
 }

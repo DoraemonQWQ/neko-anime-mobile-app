@@ -12,7 +12,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import android.os.SystemClock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs

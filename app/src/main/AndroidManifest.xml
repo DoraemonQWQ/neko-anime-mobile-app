@@ -7,7 +7,9 @@
     <!-- 应用内下载新版本后拉起系统安装界面 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- 日志在进程启动即初始化，保证早期配置和接口错误也能持久化。 -->
     <application
+        android:name=".NekoApplication"
         android:allowBackup="true"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
@@ -31,6 +33,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 日志列表只在应用内部打开，读取私有日志目录并交给 VLog 展示内容。 -->
+        <activity android:name=".logging.LogFilesActivity" android:exported="false" />
 
         <!--
             FileProvider：把下载到私有目录的安装包以 content:// 形式交给系统安装器。

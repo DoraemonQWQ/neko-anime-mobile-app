@@ -118,6 +118,8 @@ data class UserHistoryDto(
     @SerialName("view_status") val viewStatus: Int = 0,
     val progress: Double = 0.0,
     val duration: Double = 0.0,
+    /** 实测历史接口将 LastViewDate 输出为 update_date，当前为上海时区的无偏移日期字符串。 */
+    @SerialName("update_date") val updateDate: String? = null,
     /** 这一集的封面（后端抽帧的 16:9 图，继续观看卡片用） */
     val cover: String = "",
 )

@@ -1,6 +1,6 @@
 package top.nekoanime.mobile.app.component
 
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -42,12 +42,12 @@ fun CoverImage(
         onState = { state ->
             when (state) {
                 is AsyncImagePainter.State.Success ->
-                    Log.i("NekoCover", "封面加载成功: $url")
+                    Log.d("NekoCover", "封面加载成功")
 
                 is AsyncImagePainter.State.Error ->
                     Log.e(
                         "NekoCover",
-                        "封面加载失败: $url -> ${state.result.throwable}",
+                        "封面加载失败",
                         state.result.throwable,
                     )
 

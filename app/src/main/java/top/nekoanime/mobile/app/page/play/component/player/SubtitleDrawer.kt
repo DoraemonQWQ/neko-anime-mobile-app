@@ -35,12 +35,12 @@ import androidx.compose.ui.unit.sp
  * 字幕抽屉。
  *
  * @description 样式与 [EpisodeDrawer] 完全一致（同一个面板底色、同一条主色竖条、同样的按钮圆角与高亮），
- * 只是列的是**文件自带的内嵌字幕轨**：第一项固定是「关闭字幕」，后面每条轨道一项，正在用的那条主色高亮。
+ * 只列出下载校验成功的外挂字幕：第一项固定是「关闭字幕」，后面每条轨道一项，正在用的那条主色高亮。
  * 竖屏下也能用（选集抽屉只在全屏出现，字幕没有这个限制）。
  *
  * 只负责画内容与上报点击，开关动画、遮罩与层级由 [NekoPlayer] 统一处理。
  *
- * @param tracks 内嵌字幕轨（顺序与文件里一致）
+ * @param tracks 可用外挂字幕轨（顺序与接口列表一致）
  * @param onDisable 关闭字幕
  * @param onSelect 选中某条字幕轨
  * @param width 面板宽度（竖屏传窄的那档，见 PlayerDrawerNarrowWidth）
@@ -103,7 +103,7 @@ internal fun SubtitleDrawer(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SubtitleOptionButton(
+            PlayerDrawerOptionButton(
                 label = "关闭字幕",
                 // 一条都没选中才算"关闭中"，否则高亮的是正在用的那条轨道
                 active = tracks.none { it.selected },
@@ -111,7 +111,7 @@ internal fun SubtitleDrawer(
             )
 
             tracks.forEach { track ->
-                SubtitleOptionButton(
+                PlayerDrawerOptionButton(
                     label = track.label,
                     active = track.selected,
                     onClick = { onSelect(track) },
@@ -122,17 +122,19 @@ internal fun SubtitleDrawer(
 }
 
 /**
- * 抽屉里的单个字幕选项。
+ * 字幕、倍速等播放器抽屉共用的选项按钮。
  *
- * @param label 显示的名字
+ * @param label 完整名字，由按钮实际可用宽度决定是否显示省略号
  * @param active 是不是当前使用的那个
  * @param onClick 点击回调
+ * @param centered 是否居中显示；字幕默认靠左，倍速菜单可传 true
  */
 @Composable
-private fun SubtitleOptionButton(
+internal fun PlayerDrawerOptionButton(
     label: String,
     active: Boolean,
     onClick: () -> Unit,
+    centered: Boolean = false,
 ) {
     // 播放器控件一样不要涟漪：抽屉是浮层，涟漪会被遮罩挡住反而显脏
     val interaction = remember { MutableInteractionSource() }
@@ -145,10 +147,12 @@ private fun SubtitleOptionButton(
             .background(if (active) PlayerDrawerActiveColor else Color.White.copy(alpha = 0.08f))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = if (centered) Alignment.Center else Alignment.CenterStart,
     ) {
+        // 保留完整标签参与测量，只在扣除左右内边距后的宽度不足时单行省略；
+        // 面板够宽即可显示全名，不再按字符数提前截断中英文或不同宽度的字形。
         Text(
-            text = shortenLabel(label),
+            text = label,
             color = if (active) Color.White else Color.White.copy(alpha = 0.88f),
             fontSize = 14.sp,
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
@@ -157,16 +161,3 @@ private fun SubtitleOptionButton(
         )
     }
 }
-
-/**
- * 名字太长的截断（超过 [PlayerDrawerLabelMaxLength] 个字就砍掉加省略号）。
- *
- * @param label 原始名字
- * @returns 可直接显示的名字
- */
-private fun shortenLabel(label: String): String =
-    if (label.length > PlayerDrawerLabelMaxLength) {
-        label.take(PlayerDrawerLabelMaxLength) + "…"
-    } else {
-        label
-    }

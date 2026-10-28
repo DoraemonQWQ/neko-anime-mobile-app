@@ -30,6 +30,7 @@ import top.nekoanime.mobile.app.component.rememberSaveableState
 import top.nekoanime.mobile.app.component.PlaySkeleton
 import top.nekoanime.mobile.app.model.entity.AnimeDetail
 import top.nekoanime.mobile.app.state.SessionState
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import kotlinx.coroutines.launch
 
 /**
@@ -95,7 +96,7 @@ fun PlayRouteScreen(
             .onSuccess { animeState.value = it }
             .onFailure { failure ->
                 // 详情加载失败的具体原因只进日志，用户只需要知道"失败了、可以退回"
-                android.util.Log.e("PlayRoute", "番剧详情加载失败: animeId=$animeId", failure)
+                Log.e("PlayRoute", "番剧详情加载失败: animeId=$animeId", failure)
                 failed = true
             }
 

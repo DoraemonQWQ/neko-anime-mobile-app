@@ -1,7 +1,7 @@
 package top.nekoanime.mobile.app.config
 
 import android.content.Context
-import android.util.Log
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import kotlinx.serialization.json.Json
 import top.nekoanime.mobile.app.BuildConfig
 
@@ -47,14 +47,13 @@ object ConfigLoader {
 
             json.decodeFromString(AppConfig.serializer(), text)
         }.getOrElse { error ->
-            Log.e("NekoConfig", "读取 ${BuildConfig.CONFIG_FILE} 失败，使用默认配置：${error.message}")
+            Log.e("NekoConfig", "读取 ${BuildConfig.CONFIG_FILE} 失败，使用默认配置", error)
             AppConfig()
         }
 
         Log.i(
             "NekoConfig",
-            "配置已加载（${BuildConfig.CONFIG_FILE}）：baseUrl=${config.api.baseUrl}，" +
-                "首页题材=${config.home.recommendTags}",
+            "配置已加载（${BuildConfig.CONFIG_FILE}）：首页题材=${config.home.recommendTags}",
         )
     }
 }

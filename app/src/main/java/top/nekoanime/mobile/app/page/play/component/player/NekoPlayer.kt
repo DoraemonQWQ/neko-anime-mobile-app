@@ -72,6 +72,7 @@ import kotlinx.coroutines.delay
 import top.nekoanime.mobile.app.model.entity.Episode
 import top.nekoanime.mobile.app.model.entity.EpisodeSubtitle
 import top.nekoanime.mobile.app.page.play.PlaybackViewModel
+import top.nekoanime.mobile.app.logging.AppLog as Log
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -176,9 +177,10 @@ fun NekoPlayer(
     val playback: PlaybackViewModel = viewModel()
     val subtitleSession = remember(playback) { playback.subtitles(context) }
     val availableExternalIds by subtitleSession.availableTrackIds.collectAsStateWithLifecycle()
+    // 默认项由下载会话按接口顺序确定，独立观察以响应首条外挂晚于其他字幕完成的情况。
+    val defaultExternalId by subtitleSession.defaultTrackId.collectAsStateWithLifecycle()
 
-    // 顶栏标题：番剧名、剧集名、集数三段用「 | 」拼成一条（空格当分隔太不明显；
-    // 太长时由控制栏做跑马灯，每滚一次停 10 秒、进来也先停 10 秒）
+    // 顶栏标题按番剧名、剧集名、集数拼接；超宽时由控制栏往返滚动，头尾各停三秒。
     val title = listOf(animeTitle, episode.title, "第 ${episode.number} 集")
         .filter { it.isNotBlank() }
         .joinToString(" | ")
@@ -202,8 +204,12 @@ fun NekoPlayer(
 
     // 字幕抽屉是否展开
     var subtitleDrawerOpen by remember { mutableStateOf(false) }
+    // 设置与其他抽屉互斥，二级倍速菜单在同一个面板中切换，返回键先退回设置主页。
+    var settingsDrawerOpen by remember { mutableStateOf(false) }
+    var speedMenuOpen by remember { mutableStateOf(false) }
+    val subtitleSizeSp = top.nekoanime.mobile.app.data.local.PlayerPreferences.subtitleSizeSp
 
-    // 内嵌轨和下载校验成功的外挂共用菜单，未就绪外挂不占可用轨的位置。
+    // 菜单只列出下载校验成功的外挂；内嵌轨和未就绪外挂都不作为可选项。
     var currentTracks by remember(player) { mutableStateOf(player.currentTracks) }
     val subtitleTracks = remember(currentTracks, availableExternalIds) {
         collectSubtitleTracks(currentTracks, availableExternalIds)
@@ -212,7 +218,9 @@ fun NekoPlayer(
     // 播放器里**当前真正加载**的那一集：必须和外层传进来的 episode 分开——
     // 外层一改 state，episode 立刻是新剧集，但播放器里播的还是上一集（换源是后面的 effect 才做的）。
     // 不分开的话，切集时那几百毫秒的进度会被写到新剧集头上（表现就是"新剧集一打开就在上一集的位置"）。
-    val loadedEpisodeId = remember { mutableIntStateOf(episode.id) }
+    val loadedEpisodeId = remember(player) {
+        mutableIntStateOf(player.currentMediaItem?.mediaId?.toIntOrNull() ?: episode.id)
+    }
 
     // 进度回调包一层：下面的常驻 effect 只会启动一次，直接捕获参数会一直用第一次组合时的 lambda
     val currentOnProgress by rememberUpdatedState(onProgress)
@@ -239,7 +247,7 @@ fun NekoPlayer(
         // 手势可能被系统打断（比如手势中途切后台），把进行中的计数清零，
         // 不然自动隐藏会一直以为"用户还按着"，再也不自动隐藏
         interactingCount = 0
-        android.util.Log.i("NekoPlayer", "切到后台：暂停（回前台恢复=$resumeOnForeground）")
+        Log.i("NekoPlayer", "切到后台：暂停（回前台恢复=$resumeOnForeground）")
     }
 
     // 回到前台：只有切走之前确实在播才继续
@@ -247,7 +255,7 @@ fun NekoPlayer(
         if (resumeOnForeground) {
             resumeOnForeground = false
             player.play()
-            android.util.Log.i("NekoPlayer", "回到前台：继续播放")
+            Log.i("NekoPlayer", "回到前台：继续播放")
         }
     }
 
@@ -281,7 +289,10 @@ fun NekoPlayer(
     var buffering by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var locked by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(1f) }
+    // 新播放器默认为 1.0x；返回仍存活的播放器时读取实际倍速，避免菜单高亮与真实播放不一致。
+    var speed by remember(player) { mutableStateOf(player.playbackParameters.speed) }
+    // 长按临时加速结束后恢复菜单选定的速度，不能把 0.75x 等选择强行重置成 1.0x。
+    var speedBeforeLongPress by remember(player) { mutableStateOf<Float?>(null) }
     var hud by remember { mutableStateOf<PlayerHudState?>(null) }
 
     // 拖进度条期间中央指示框要一直挂着（固定位置不变，不该等 900ms 自己消失）
@@ -299,8 +310,13 @@ fun NekoPlayer(
     var pendingSeekAt by remember { mutableLongStateOf(0L) }
 
     DisposableEffect(player) {
+        // 连播由页面按剧集 number 决定；播放器自身必须关闭循环和随机播放，
+        // 否则末集会自行回绕，页面也收不到可靠的自然结束事件。
+        player.repeatMode = Player.REPEAT_MODE_OFF
+        player.shuffleModeEnabled = false
+
         // 只用于验证「切全屏不会重建播放器」：正常一次播放会话里这行只应该出现一次
-        android.util.Log.i("NekoPlayer", "ExoPlayer 创建")
+        Log.i("NekoPlayer", "ExoPlayer 创建")
         onPlayerReady(player)
 
         val listener = object : Player.Listener {
@@ -334,27 +350,22 @@ fun NekoPlayer(
                 // 不然用户一上来看到"播放失败"却连退出去的按钮都找不到
                 controlsVisible = true
 
-                android.util.Log.e("NekoPlayer", "播放出错: ${error.errorCodeName}")
+                Log.e("NekoPlayer", "播放出错: ${error.errorCodeName}")
             }
 
             /** 原生轨道变化与外挂就绪状态一起决定统一菜单。 */
             override fun onTracksChanged(tracks: Tracks) {
                 currentTracks = tracks
+                // 真机排查仅输出字幕轨标识与支持状态，确认内嵌被剔除及外挂已合并，不打印地址。
+                tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
+                    for (index in 0 until group.length) {
+                        Log.d("NekoSubtitle", "字幕轨 id=${group.getTrackFormat(index).id} supported=${group.isTrackSupported(index)}")
+                    }
+                }
             }
         }
 
         player.addListener(listener)
-
-        /*
-         * 字幕轨默认得有人选，否则画面干干净净一个字都没有。
-         * 中文轨在容器里的语言标记五花八门（chi / zho / zh / und），这里都列进偏好里；
-         * 完全没标语言的轨也允许被选中（不少压制组就是不写语言标记）。
-         */
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setPreferredTextLanguages("zh", "zh-Hans", "zh-Hant", "chi", "zho", "chs", "cht")
-            .setSelectUndeterminedTextLanguage(true)
-            .build()
 
         onDispose {
             // 离开播放页：把最后的位置补报一次，别丢最后几秒
@@ -369,7 +380,7 @@ fun NekoPlayer(
             // 只暂停、不释放：这个播放页可能只是被压在另一个播放页下面（返回时要接着播）。
             // 真正的释放交给 PlaybackViewModel.onCleared（页面被弹出时）。
             player.pause()
-            android.util.Log.i("NekoPlayer", "离开播放页：暂停（播放器由 ViewModel 持有，不释放）")
+            Log.i("NekoPlayer", "离开播放页：暂停（播放器由 ViewModel 持有，不释放）")
         }
     }
 
@@ -386,12 +397,12 @@ fun NekoPlayer(
             // 上次会话是停在出错状态（idle）的：这时候光 play() 不会重新加载，
             // 必须先 prepare 才会再去请求一次，否则返回本页就是一块永远不动的黑屏
             if (player.playbackState == Player.STATE_IDLE) {
-                android.util.Log.i("NekoPlayer", "媒体源未变但播放器停在 idle，重新 prepare")
+                Log.i("NekoPlayer", "媒体源未变但播放器停在 idle，重新 prepare")
                 player.prepare()
             }
 
             player.play()
-            android.util.Log.i("NekoPlayer", "媒体源未变，直接续播（不重新加载）")
+            Log.i("NekoPlayer", "媒体源未变，直接续播（不重新加载）")
 
             return@LaunchedEffect
         }
@@ -399,23 +410,33 @@ fun NekoPlayer(
         hasError = false
         drawerOpen = false
         subtitleDrawerOpen = false
-        android.util.Log.i("NekoPlayer", "换源: episode=${episode.id}")
+        settingsDrawerOpen = false
+        speedMenuOpen = false
+        Log.i("NekoPlayer", "换源: episode=${episode.id}")
 
         // 换源前把上一集的进度补报一次（此时 episode 已经是新值，所以要报 loadedEpisodeId）
         if (player.mediaItemCount > 0) {
             currentOnProgress(loadedEpisodeId.intValue, player.currentPosition, durationMs)
         }
 
-        // 预留轨尚未下载，不允许默认选择抢占可用内嵌轨。
+        // 外挂尚未就绪时关闭文本渲染，等有序默认项准备完成后再显式选择。
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
         currentTracks = Tracks.EMPTY
         subtitleSession.setSource(player, url, subtitles, episode.id.toString())
+        // 建源同步完成后立刻对齐实际剧集和进度 UI，清掉上一集未生效的 seek 预览。
+        // 尤其自动连播起点为零时，不能让上一集的 pendingSeek 把旧位置写到新一集。
+        loadedEpisodeId.intValue = episode.id
+        pendingSeekMs = null
+        seeking = false
+        positionMs = 0L
+        durationMs = 0L
+        bufferedMs = 0L
         player.prepare()
 
-        // 续播：外层已经把"这一集该从哪秒开始"算好了（本地进度优先），这里只负责跳过去
+        // 手动切集保留逐集续播；自然结束切到下一集时页面会显式传入零。
         val resumeMs = initialPositionMs.coerceAtLeast(0L)
 
         if (resumeMs > 0L) {
@@ -426,38 +447,49 @@ fun NekoPlayer(
         }
 
         player.playWhenReady = true
-        loadedEpisodeId.intValue = episode.id
     }
 
-    LaunchedEffect(episode.id, url, subtitleTracks) {
-        // 换源 effect 与选轨 effect 可能同帧启动，绝不把旧集 TrackGroup 应用到新源。
-        val sourceMatches = player.currentMediaItem?.mediaId == episode.id.toString() &&
-            player.currentMediaItem?.localConfiguration?.uri?.toString() == url
-        if (sourceMatches && currentTracks == player.currentTracks &&
-            !subtitleSession.subtitleChoiceMade && subtitleTracks.isNotEmpty()
-        ) {
-            val track = subtitleTracks.firstOrNull { it.selected }
-                ?: subtitleTracks.firstOrNull {
-                    val format = it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())
-                    format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0
+    LaunchedEffect(episode.id, url, subtitleTracks, defaultExternalId) {
+        // 换源 effect 与选轨 effect 可能同帧启动；subtitleTracks / defaultExternalId 是本次组合的快照，
+        // 切集瞬间仍是上一集的值。所以只在确认播放器已经是这一集之后，再现场读取会话默认项和实际轨道，
+        // 绝不把上一集的 TrackGroup 设成新源的覆盖（那样会白白消耗掉"未选择"状态，新集再也不自动选轨）。
+        val currentItem = player.currentMediaItem
+        val sourceMatches = currentItem?.mediaId == episode.id.toString() &&
+            currentItem?.localConfiguration?.uri?.toString() == url
+        if (sourceMatches && !subtitleSession.subtitleChoiceMade) {
+            // 只按会话指定的首条外挂自动选中；未准备好时继续等待，不回退到其他语言或默认标记。
+            val defaultId = subtitleSession.defaultTrackId.value
+            if (defaultId != null) {
+                val liveTracks = collectSubtitleTracks(
+                    player.currentTracks,
+                    subtitleSession.availableTrackIds.value,
+                )
+                val track = liveTracks.firstOrNull {
+                    externalSubtitleId(it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())) == defaultId
                 }
-                ?: subtitleTracks.firstOrNull {
-                    val format = it.override.mediaTrackGroup.getFormat(it.override.trackIndices.first())
-                    isChineseLanguage(format.language)
+                if (track != null) {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(track.override)
+                        .build()
+                    // 外挂可能比视频晚到（网络慢或首条失败后才轮到下一条），也可能是暂停状态下才就绪；
+                    // 原地 seek 一下让字幕渲染器立刻按当前位置补一帧，避免"选了却不出字"。
+                    if (!player.playWhenReady) {
+                        player.seekTo(player.currentPosition)
+                    }
+                    subtitleSession.subtitleChoiceMade = true
+                    // 只记剧集编号，不输出带签名的字幕地址，便于真机核对切集后的自动选轨。
+                    Log.d("NekoSubtitle", "自动选中外挂字幕 episode=${episode.id}")
                 }
-                ?: subtitleTracks.first()
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(track.override)
-                .build()
-            subtitleSession.subtitleChoiceMade = true
+            }
         }
-        if (subtitleTracks.isEmpty()) subtitleDrawerOpen = false
+        // 接口未声明外挂时才收起面板；下载过程中可保持打开，等待可用列表自动更新。
+        if (subtitles.isEmpty()) subtitleDrawerOpen = false
     }
 
     // 全屏切换只改布局，不碰播放器。打一行日志方便用 logcat 验证「切全屏没有重新加载」
     LaunchedEffect(fullscreen) {
-        android.util.Log.i("NekoPlayer", "fullscreen=$fullscreen（播放器不重建）")
+        Log.i("NekoPlayer", "fullscreen=$fullscreen（播放器不重建）")
 
         // 退出全屏（比如旋转回竖屏）时把抽屉收掉，免得留一层遮罩在竖屏界面上
         if (!fullscreen) {
@@ -466,9 +498,15 @@ fun NekoPlayer(
     }
 
     // 抽屉展开时，系统返回键先收抽屉，而不是直接退出播放页
-    BackHandler(enabled = drawerOpen || subtitleDrawerOpen) {
-        drawerOpen = false
-        subtitleDrawerOpen = false
+    BackHandler(enabled = drawerOpen || subtitleDrawerOpen || settingsDrawerOpen) {
+        if (settingsDrawerOpen && speedMenuOpen) {
+            speedMenuOpen = false
+        } else {
+            drawerOpen = false
+            subtitleDrawerOpen = false
+            settingsDrawerOpen = false
+            speedMenuOpen = false
+        }
     }
 
     /** 一次操作开始：暂停自动隐藏 + 重新计时 */
@@ -491,7 +529,7 @@ fun NekoPlayer(
     fun retryPlayback() {
         val resumeMs = player.currentPosition.coerceAtLeast(0L)
 
-        android.util.Log.i("NekoPlayer", "重试播放: episode=${episode.id} @ ${resumeMs}ms")
+        Log.i("NekoPlayer", "重试播放: episode=${episode.id} @ ${resumeMs}ms")
 
         hasError = false
         currentTracks = Tracks.EMPTY
@@ -522,23 +560,25 @@ fun NekoPlayer(
         interactingCount,
         drawerOpen,
         subtitleDrawerOpen,
+        settingsDrawerOpen,
         controlsPinned,
     ) {
         if (controlsVisible &&
             !drawerOpen &&
             !subtitleDrawerOpen &&
+            !settingsDrawerOpen &&
             interactingCount == 0 &&
             !controlsPinned
         ) {
             delay(ControlsAutoHideMillis)
             controlsVisible = false
-            android.util.Log.i("NekoPlayer", "控制栏 5 秒无操作，自动隐藏")
+            Log.i("NekoPlayer", "控制栏 5 秒无操作，自动隐藏")
         }
     }
 
     // 控制栏显隐日志：真机跑自动化脚本时靠它判断现在点画面到底会「显示」还是「隐藏」控制栏
     LaunchedEffect(controlsVisible, locked) {
-        android.util.Log.i("NekoPlayer", "控制栏 visible=$controlsVisible locked=$locked")
+        Log.i("NekoPlayer", "控制栏 visible=$controlsVisible locked=$locked")
     }
 
     // 每 250ms 仅刷新进度 UI，字幕渲染与同步完全交给原生播放器时钟。
@@ -562,7 +602,7 @@ fun NekoPlayer(
 
                     // 播放器已追上目标位置，或者等了 2 秒还没追上（异常情况兜底，避免进度条卡死）
                     if (abs(live - target) <= 800L || SystemClock.elapsedRealtime() - pendingSeekAt > 2000L) {
-                        android.util.Log.i(
+                        Log.i(
                             "NekoPlayer",
                             "seek 生效 target=${target / 1000}s live=${live / 1000}s",
                         )
@@ -583,7 +623,7 @@ fun NekoPlayer(
 
             // 每 5 秒打一条状态，方便用 adb logcat 验证「在播、播到哪、掉了几帧」
             if (logTicks++ % 20 == 0) {
-                android.util.Log.i(
+                Log.i(
                     "NekoPlayer",
                     "pos=${positionMs / 1000}s dur=${durationMs / 1000}s buffered=${bufferedMs / 1000}s " +
                         "playing=$playing dropped=${player.videoFormat?.width}x${player.videoFormat?.height}",
@@ -683,14 +723,14 @@ fun NekoPlayer(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
-                    applySubtitleStyle(this)
+                    applySubtitleStyle(this, subtitleSizeSp)
                 }
             },
             update = { view ->
                 view.player = player
                 // PlayerView 绑播放器时会把**系统**字幕样式套回来（不少 ROM 默认是白字黑底），
                 // 绑完再设一遍自己的样式，字幕才是"白字 + 黑描边、背景透明"
-                applySubtitleStyle(view)
+                applySubtitleStyle(view, subtitleSizeSp)
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -706,7 +746,7 @@ fun NekoPlayer(
                 .playerGestures(
                     // 抽屉展开时关掉播放器手势：抽屉是模态浮层，
                     // 这时在阴影/抽屉上滑动不该再改播放进度或亮度音量
-                    enabled = !drawerOpen && !subtitleDrawerOpen,
+                    enabled = !drawerOpen && !subtitleDrawerOpen && !settingsDrawerOpen,
                     locked = locked,
                     // 首次加载没完成、或者播放失败时：双击跳转 / 双击播放暂停 / 拖动进度 / 长按倍速全关。
                     // 单击仍然保留——控制栏要通过它显隐（不过这两种状态下控制栏本来就被钉住不隐藏）。
@@ -761,7 +801,7 @@ fun NekoPlayer(
                     },
                     onSeekEnd = {
                         if (seeking) {
-                            android.util.Log.i(
+                            Log.i(
                                 "NekoPlayer",
                                 "手势 seek: start=${seekStartMs / 1000}s target=${seekPreviewMs / 1000}s",
                             )
@@ -781,17 +821,19 @@ fun NekoPlayer(
                     onVerticalDragEnd = { hud = null },
                     onLongPressStart = {
                         if (!locked) {
+                            speedBeforeLongPress = player.playbackParameters.speed
                             speed = 2f
                             player.setPlaybackSpeed(2f)
                             hud = PlayerHudState.Speed(2f)
                         }
                     },
                     onLongPressEnd = {
-                        if (speed != 1f) {
-                            speed = 1f
-                            player.setPlaybackSpeed(1f)
-                            hud = null
+                        speedBeforeLongPress?.let { previous ->
+                            speed = previous
+                            player.setPlaybackSpeed(previous)
+                            speedBeforeLongPress = null
                         }
+                        hud = null
                     },
                     // 视频区手势：按下暂停计时、抬起继续计时
                     onInteractionStart = { beginInteraction() },
@@ -899,18 +941,23 @@ fun NekoPlayer(
                 locked = locked,
                 fullscreen = fullscreen,
                 title = title,
+                // 将实际控制器可见性传给标题，淡出即停止；重新出现时位置归零并重新计三秒。
+                controlsShown = controlsVisible || controlsPinned,
                 // 播放键全屏/非全屏都保留（非全屏另外还有双击画面中间与中央的大播放键）
                 onTogglePlay = { if (player.isPlaying) player.pause() else player.play() },
                 onSeek = { target -> seekTo(target) },
                 onToggleSpeed = {
-                    // 1.0 → 1.25 → 1.5 → 2.0 → 1.0
-                    speed = when (speed) {
-                        1f -> 1.25f
-                        1.25f -> 1.5f
-                        1.5f -> 2f
-                        else -> 1f
-                    }
-                    player.setPlaybackSpeed(speed)
+                    // 原倍速文字入口与设置里的倍速入口共用单选菜单，避免两套速度选项不一致。
+                    drawerOpen = false
+                    subtitleDrawerOpen = false
+                    settingsDrawerOpen = true
+                    speedMenuOpen = true
+                },
+                onOpenSettings = {
+                    drawerOpen = false
+                    subtitleDrawerOpen = false
+                    speedMenuOpen = false
+                    settingsDrawerOpen = true
                 },
                 onToggleLock = { locked = !locked },
                 onToggleFullscreen = onToggleFullscreen,
@@ -952,15 +999,19 @@ fun NekoPlayer(
                 episodeDrawer = if (fullscreen && sortedEpisodes.size > 1) {
                     {
                         subtitleDrawerOpen = false
+                        settingsDrawerOpen = false
+                        speedMenuOpen = false
                         drawerOpen = true
                     }
                 } else {
                     null
                 },
-                // 内嵌和下载校验成功的外挂共用菜单，只有完全无可用轨时隐藏。
-                subtitleDrawer = if (subtitleTracks.isNotEmpty()) {
+                // 接口声明外挂就保留字幕入口，不因下载或轨道准备尚未完成而隐藏按钮。
+                subtitleDrawer = if (subtitles.isNotEmpty()) {
                     {
                         drawerOpen = false
+                        settingsDrawerOpen = false
+                        speedMenuOpen = false
                         subtitleDrawerOpen = true
                     }
                 } else {
@@ -976,13 +1027,13 @@ fun NekoPlayer(
         // 如果遮罩在控制栏下面，点在控制栏区域会先触发播放/进度条，而不是关抽屉。
         // 两个抽屉（选集 / 字幕）共用这一套遮罩与层级，同一时刻只会开一个。
         // 遮罩要给抽屉让出的宽度得跟当前抽屉一致：竖屏的字幕抽屉是窄的那档
-        val activeDrawerWidth = if (subtitleDrawerOpen && !fullscreen) {
+        val activeDrawerWidth = if ((subtitleDrawerOpen || settingsDrawerOpen) && !fullscreen) {
             PlayerDrawerNarrowWidth
         } else {
             PlayerDrawerWidth
         }
 
-        if (drawerOpen || subtitleDrawerOpen) {
+        if (drawerOpen || subtitleDrawerOpen || settingsDrawerOpen) {
             // 遮罩分两层，别把"点阴影关闭"做成一整块都能关：
             // 1) 整块压暗——纯绘制，不接任何手势；
             // 2) 只有抽屉以外的那块阴影接点击 → 点阴影才关抽屉。
@@ -1002,6 +1053,8 @@ fun NekoPlayer(
                             detectTapGestures {
                                 drawerOpen = false
                                 subtitleDrawerOpen = false
+                                settingsDrawerOpen = false
+                                speedMenuOpen = false
                             }
                         },
                 )
@@ -1027,7 +1080,7 @@ fun NekoPlayer(
         }
 
         // ===== 字幕抽屉 =====
-        // 内嵌与外挂统一选轨，竖屏也使用同一个抽屉。
+        // 仅显示可用外挂字幕，横竖屏共用同一个抽屉和手动选择状态。
         AnimatedVisibility(
             visible = subtitleDrawerOpen,
             enter = slideInHorizontally(initialOffsetX = { it }),
@@ -1063,13 +1116,38 @@ fun NekoPlayer(
             )
         }
 
+        // 设置面板与字幕共用宽高、遮罩和动画；选择倍速后仍停留菜单以便核对单选高亮。
+        AnimatedVisibility(
+            visible = settingsDrawerOpen,
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it }),
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            PlayerSettingsDrawer(
+                speed = speed,
+                subtitleSizeSp = subtitleSizeSp,
+                showSpeedOptions = speedMenuOpen,
+                onOpenSpeed = { speedMenuOpen = true },
+                onBack = { speedMenuOpen = false },
+                onSpeedSelect = { selected ->
+                    speed = selected
+                    player.setPlaybackSpeed(selected)
+                    Log.i("PlayerSettings", "播放倍速已切换 speed=$selected")
+                },
+                onSubtitleSizeChange = {
+                    top.nekoanime.mobile.app.data.local.PlayerPreferences.setSubtitleSize(it)
+                },
+                width = if (fullscreen) PlayerDrawerWidth else PlayerDrawerNarrowWidth,
+            )
+        }
+
         // 分辨率与缓冲/丢帧统计不再画在画面上（会跟 B 站 风格的控制栏打架），
         // 需要看的时候用 adb logcat -s NekoPlayer：每 5 秒一条 pos/dur/buffered/playing。
     }
 }
 
 /**
- * 内嵌或外挂的一条原生字幕轨。
+ * 一条已完成下载校验、可交给原生渲染器播放的外挂字幕轨。
  *
  * @param override 选中这条轨要用的 override
  * @param label 抽屉里显示的名字
@@ -1082,7 +1160,7 @@ internal data class SubtitleTrack(
 )
 
 /**
- * 收集所有原生可解码字幕轨，外挂只有下载和解析成功后才成为可用选项。
+ * 仅收集已下载并解析成功的外挂字幕，防御性排除所有容器内嵌轨。
  *
  * @param tracks 播放器上报的轨道集合
  * @param availableExternalIds 已准备好的外挂轨道标识
@@ -1106,7 +1184,8 @@ internal fun collectSubtitleTracks(tracks: Tracks, availableExternalIds: Set<Str
             }
 
             val format = group.getTrackFormat(index)
-            if (format.id?.startsWith("neko-external:") == true && format.id !in availableExternalIds) {
+            // 仅允许本会话创建且已校验的外挂标识，播放器意外上报内嵌轨时也不会显示或选择。
+            if (externalSubtitleId(format) !in availableExternalIds) {
                 continue
             }
             formats += format
@@ -1124,6 +1203,14 @@ internal fun collectSubtitleTracks(tracks: Tracks, availableExternalIds: Set<Str
             selected = selected[index],
         )
     }
+}
+
+/** Media3 合并源会在 Format.id 前添加数字子源编号；去掉这些前缀后再与会话的外挂白名单匹配。 */
+internal fun externalSubtitleId(format: Format): String? {
+    val id = format.id ?: return null
+    // 仅接受原始外挂标识或数字源前缀，不能用任意子串匹配而误接收容器内嵌轨。
+    return Regex("^(?:[0-9]+:)*(neko-external:[^:]+:[0-9]+)$")
+        .matchEntire(id)?.groupValues?.get(1)
 }
 
 /**
@@ -1157,17 +1244,6 @@ private fun buildSubtitleLabels(formats: List<Format>): List<String> {
 }
 
 /**
- * 这条字幕轨是不是中文（各组的语言标记写法不一样，能认的都认上）。
- *
- * @param language 容器里的语言标记
- * @returns 是中文返回 true
- */
-private fun isChineseLanguage(language: String?): Boolean = when (language?.lowercase()) {
-    "chi", "zho", "zh", "zh-hans", "zh-hant", "chs", "cht", "chi-hans", "chi-hant" -> true
-    else -> false
-}
-
-/**
  * 语言标记 → 中文名。
  *
  * @param language 容器里的语言标记
@@ -1192,7 +1268,7 @@ private fun languageDisplayName(language: String?): String = when (language?.low
  * @param playerView 播放器视图
  */
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-private fun applySubtitleStyle(playerView: PlayerView) {
+private fun applySubtitleStyle(playerView: PlayerView, subtitleSizeSp: Int) {
     val subtitleView = playerView.subtitleView ?: return
 
     subtitleView.setStyle(
@@ -1206,8 +1282,9 @@ private fun applySubtitleStyle(playerView: PlayerView) {
         ),
     )
 
-    // 默认字号在手机上偏小，横屏更看不清
-    subtitleView.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+    // 全局字号直接作用于外挂的原生字幕视图，并忽略字幕文件内字号，避免作者样式覆盖用户选择。
+    subtitleView.setApplyEmbeddedFontSizes(false)
+    subtitleView.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, subtitleSizeSp.toFloat())
 
     // 字幕默认贴着底边，会被控制栏压住，抬起来一点
     subtitleView.setBottomPaddingFraction(0.12f)
